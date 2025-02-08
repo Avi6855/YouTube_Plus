@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:navigationIcon="?homeAsUpIndicator"
+            app:title="@string/about" />
+
+        <ImageView
+            android:id="@+id/app_icon"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_gravity="center"
+            android:layout_marginTop="30dp"
+            android:src="@drawable/logo_1"
+            tools:ignore="ContentDescription" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginBottom="40dp">
+
+            <TextView
+                android:id="@+id/app_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerHorizontal="true"
+                android:layout_marginTop="30dp"
+                android:text="@string/app_name"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/version_card"
+                style="@style/Widget.Material3.CardView.Elevated"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="-40dp"
+                android:layout_toEndOf="@id/app_name">
+
+                <!--
+                <TextView
+                    android:id="@+id/version_tv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_marginVertical="3dp"
+                    tools:text="@string/youtube" />
+                -->
+            </com.google.android.material.card.MaterialCardView>
+
+        </RelativeLayout>
+
+        <!--
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/donate"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/donate"
+                app:drawableStartCompat="@drawable/ic_donate" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/website"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/website"
+                app:drawableStartCompat="@drawable/ic_region" />
+
+        </com.google.android.material.card.MaterialCardView>
+        -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/github"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/github"
+                app:drawableStartCompat="@drawable/ic_github" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+
+
+        <!--
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/piped"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/piped"
+                app:drawableStartCompat="@drawable/ic_piped" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/translate"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/translate"
+                app:drawableStartCompat="@drawable/ic_weblate" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/license"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/license"
+                app:drawableStartCompat="@drawable/ic_license" />
+
+        </com.google.android.material.card.MaterialCardView>
+        -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/device"
+            style="@style/AboutCard">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                style="@style/AboutItem"
+                android:text="@string/device_info"
+                app:drawableStartCompat="@drawable/ic_device" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:id="@+id/developerLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="30dp"
+            android:padding="16dp"
+            android:gravity="center">
+
+            <ImageView
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/circle_white_border"
+                android:scaleType="centerCrop"
+                android:src="@drawable/avinash_patil" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/black_border"
+                android:padding="20dp"
+                android:text="Developed by ✔Avinash Patil✔"
+                android:textColor="@color/black"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</ScrollView>
