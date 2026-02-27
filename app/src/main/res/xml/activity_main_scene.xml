@@ -2,45 +2,61 @@
 <MotionScene xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:motion="http://schemas.android.com/apk/res-auto">
 
+    <!--
+        IMPORTANT:
+        If you change bottomNav height,
+        update dynamic height logic in MainActivity.kt accordingly.
+    -->
+
     <Transition
-        motion:constraintSetEnd="@+id/end"
+        android:id="@+id/bottom_bar_transition"
         motion:constraintSetStart="@id/start"
+        motion:constraintSetEnd="@id/end"
         motion:duration="10"
         motion:layoutDuringTransition="honorRequest">
+
         <KeyFrameSet>
+
+            <!-- Bottom Navigation Slide Animation -->
+
             <KeyAttribute
-                android:translationY="0dp"
+                motion:motionTarget="@id/bottomNav"
                 motion:framePosition="0"
-                motion:motionTarget="@+id/bottomNav" />
+                android:translationY="0dp" />
 
             <KeyAttribute
-                android:translationY="80dp"
+                motion:motionTarget="@id/bottomNav"
                 motion:framePosition="1"
-                motion:motionTarget="@+id/bottomNav" />
+                android:translationY="80dp" />
 
             <KeyAttribute
-                android:translationY="0dp"
+                motion:motionTarget="@id/bottomNav"
                 motion:framePosition="100"
-                motion:motionTarget="@+id/bottomNav" />
+                android:translationY="0dp" />
+
+            <!-- Container Content Animation -->
 
             <KeyAttribute
-                android:scaleY="1"
+                motion:motionTarget="@id/container"
                 motion:framePosition="30"
-                motion:motionTarget="@+id/container" />
+                android:scaleY="1" />
 
             <KeyAttribute
-                android:translationY="0dp"
+                motion:motionTarget="@id/container"
                 motion:framePosition="35"
-                motion:motionTarget="@+id/container" />
+                android:translationY="0dp" />
 
             <KeyAttribute
-                android:translationY="-80dp"
+                motion:motionTarget="@id/container"
                 motion:framePosition="100"
-                motion:motionTarget="@+id/container" />
+                android:translationY="-80dp" />
+
         </KeyFrameSet>
+
     </Transition>
 
     <ConstraintSet android:id="@+id/start" />
 
     <ConstraintSet android:id="@+id/end" />
+
 </MotionScene>

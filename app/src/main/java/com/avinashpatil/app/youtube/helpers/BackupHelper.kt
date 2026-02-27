@@ -6,10 +6,12 @@ import android.util.Log
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
 import androidx.work.ExistingPeriodicWorkPolicy
+import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.api.JsonHelper
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.db.DatabaseHolder.Database
 import com.avinashpatil.app.youtube.extensions.TAG
+import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.obj.BackupFile
 import com.avinashpatil.app.youtube.obj.PreferenceItem
 import kotlinx.coroutines.Dispatchers
@@ -30,13 +32,15 @@ object BackupHelper {
      * Write a [BackupFile] containing the database content as well as the preferences
      */
     @OptIn(ExperimentalSerializationApi::class)
-    fun createAdvancedBackup(context: Context, uri: Uri, backupFile: BackupFile) {
+    suspend fun createAdvancedBackup(context: Context, uri: Uri, backupFile: BackupFile) {
         try {
             context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                 JsonHelper.json.encodeToStream(backupFile, outputStream)
             }
+            context.toastFromMainDispatcher(R.string.backup_creation_success)
         } catch (e: Exception) {
             Log.e(TAG(), "Error while writing backup: $e")
+            context.toastFromMainDispatcher(R.string.backup_creation_failed)
         }
     }
 

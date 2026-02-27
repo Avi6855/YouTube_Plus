@@ -1,8 +1,8 @@
 package com.avinashpatil.app.youtube.extensions
 
 import android.icu.text.CompactDecimalFormat
-import com.avinashpatil.app.youtube.helpers.LocaleHelper
+import java.util.Locale
 
 fun Long?.formatShort(): String = CompactDecimalFormat
-    .getInstance(LocaleHelper.getAppLocale(), CompactDecimalFormat.CompactStyle.SHORT)
+    .getInstance(Locale.getDefault(), CompactDecimalFormat.CompactStyle.SHORT)
     .format(this ?: 0)

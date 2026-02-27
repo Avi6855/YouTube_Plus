@@ -10,8 +10,11 @@ import androidx.room.Update
 import com.avinashpatil.app.youtube.db.obj.Download
 import com.avinashpatil.app.youtube.db.obj.DownloadChapter
 import com.avinashpatil.app.youtube.db.obj.DownloadItem
+import com.avinashpatil.app.youtube.db.obj.DownloadPlaylist
+import com.avinashpatil.app.youtube.db.obj.DownloadPlaylistVideosCrossRef
+import com.avinashpatil.app.youtube.db.obj.DownloadPlaylistWithDownload
+import com.avinashpatil.app.youtube.db.obj.DownloadSponsorBlockSegment
 import com.avinashpatil.app.youtube.db.obj.DownloadWithItems
-import com.avinashpatil.app.youtube.enums.FileType
 
 @Dao
 interface DownloadDao {
@@ -25,9 +28,6 @@ interface DownloadDao {
 
     @Query("SELECT EXISTS (SELECT * FROM download WHERE videoId = :videoId)")
     suspend fun exists(videoId: String): Boolean
-
-    @Query("SELECT videoId FROM downloadItem WHERE type = :fileType ORDER BY RANDOM() LIMIT 1")
-    suspend fun getRandomVideoIdByFileType(fileType: FileType): String?
 
     @Query("SELECT * FROM downloaditem WHERE id = :id")
     suspend fun findDownloadItemById(id: Int): DownloadItem?
@@ -50,4 +50,45 @@ interface DownloadDao {
     @Transaction
     @Delete
     suspend fun deleteDownload(download: Download)
+
+    @Transaction
+    @Query("SELECT * FROM downloadPlaylist")
+    suspend fun getDownloadPlaylists(): List<DownloadPlaylistWithDownload>
+
+    @Transaction
+    @Query("SELECT * FROM downloadPlaylist WHERE playlistId = :playlistId")
+    suspend fun getDownloadPlaylistById(playlistId: String): DownloadPlaylistWithDownload
+
+    @Transaction
+    @Query("SELECT * FROM downloadPlaylist WHERE playlistId = :playlistId")
+    suspend fun getDownloadPlaylistByIdIncludingItems(playlistId: String): com.avinashpatil.app.youtube.db.obj.DownloadPlaylistWithDownloadWithItems
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlaylist(downloadPlaylist: DownloadPlaylist)
+
+    /**
+     * Connect a [DownloadPlaylist] to a [Download] to link the playlist to the video.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistVideoConnection(crossRef: DownloadPlaylistVideosCrossRef)
+
+    @Suppress("DEPRECATION")
+    suspend fun deletePlaylistIncludingVideoRefs(playlist: DownloadPlaylist) {
+        deletePlaylistCrossRef(playlist.playlistId)
+        deletePlaylist(playlist)
+    }
+
+    @Delete
+    @Deprecated("Call deletePlaylistIncludingVideoRefs instead!")
+    suspend fun deletePlaylist(playlist: DownloadPlaylist)
+
+    @Query("DELETE FROM downloadplaylistvideoscrossref WHERE playlistId = :playlistId")
+    @Deprecated("Call deletePlaylistIncludingVideoRefs instead!")
+    suspend fun deletePlaylistCrossRef(playlistId: String)
+
+    @Query("SELECT * FROM downloadplaylistvideoscrossref WHERE playlistId = :playlistId")
+    suspend fun getVideoIdsFromPlaylist(playlistId: String): List<DownloadPlaylistVideosCrossRef>
+
+    @Insert
+    suspend fun insertSponsorBlockSegments(segments: List<DownloadSponsorBlockSegment>)
 }

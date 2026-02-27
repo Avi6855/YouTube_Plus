@@ -6,7 +6,7 @@ import androidx.core.net.toUri
 import androidx.core.os.bundleOf
 import androidx.lifecycle.lifecycleScope
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.StreamsExtractor
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
@@ -41,7 +41,7 @@ class AddToPlaylistActivity : BaseActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val videoInfo = if (PreferenceHelper.getToken().isEmpty()) {
                 try {
-                    StreamsExtractor.extractStreams(videoId).toStreamItem(videoId)
+                    MediaServiceRepository.instance.getStreams(videoId).toStreamItem(videoId)
                 } catch (e: Exception) {
                     toastFromMainDispatcher(R.string.unknown_error)
                     withContext(Dispatchers.Main) {

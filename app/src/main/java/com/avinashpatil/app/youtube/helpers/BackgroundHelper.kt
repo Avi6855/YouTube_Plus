@@ -1,12 +1,10 @@
 package com.avinashpatil.app.youtube.helpers
 
-import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.OptIn
-import androidx.core.content.getSystemService
 import androidx.core.os.bundleOf
 import androidx.fragment.app.commit
 import androidx.media3.common.util.UnstableApi
@@ -17,12 +15,13 @@ import com.avinashpatil.app.youtube.parcelable.PlayerData
 import com.avinashpatil.app.youtube.services.AbstractPlayerService
 import com.avinashpatil.app.youtube.services.OfflinePlayerService
 import com.avinashpatil.app.youtube.services.OnlinePlayerService
-import com.avinashpatil.app.youtube.services.VideoOfflinePlayerService
-import com.avinashpatil.app.youtube.services.VideoOnlinePlayerService
 import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.avinashpatil.app.youtube.ui.activities.NoInternetActivity
+import com.avinashpatil.app.youtube.ui.fragments.DownloadSortingOrder
 import com.avinashpatil.app.youtube.ui.fragments.DownloadTab
 import com.avinashpatil.app.youtube.ui.fragments.PlayerFragment
+import com.avinashpatil.app.youtube.util.PlayingQueue
+import com.avinashpatil.app.youtube.util.PlayingQueueMode
 import com.google.common.util.concurrent.MoreExecutors
 
 /**
@@ -40,23 +39,21 @@ object BackgroundHelper {
         playlistId: String? = null,
         channelId: String? = null,
         keepQueue: Boolean = false,
-        keepVideoPlayerAlive: Boolean = false
     ) {
         // close the previous video player if open
-        if (!keepVideoPlayerAlive) {
-            val fragmentManager =
-                ContextHelper.unwrapActivity<MainActivity>(context).supportFragmentManager
-            fragmentManager.fragments.firstOrNull { it is PlayerFragment }?.let {
-                fragmentManager.commit { remove(it) }
-            }
+        val fragmentManager =
+            ContextHelper.unwrapActivity<MainActivity>(context).supportFragmentManager
+        fragmentManager.fragments.firstOrNull { it is PlayerFragment }?.let {
+            fragmentManager.commit { remove(it) }
         }
 
         val playerData = PlayerData(videoId, playlistId, channelId, keepQueue, position)
 
+        stopBackgroundPlay(context)
         startMediaService(
             context,
             OnlinePlayerService::class.java,
-            bundleOf(IntentData.playerData to playerData)
+            bundleOf(IntentData.playerData to playerData, IntentData.audioOnly to true)
         )
     }
 
@@ -66,25 +63,11 @@ object BackgroundHelper {
     fun stopBackgroundPlay(context: Context) {
         arrayOf(
             OnlinePlayerService::class.java,
-            OfflinePlayerService::class.java,
-            VideoOfflinePlayerService::class.java,
-            VideoOnlinePlayerService::class.java
+            OfflinePlayerService::class.java
         ).forEach {
             val intent = Intent(context, it)
             context.stopService(intent)
         }
-    }
-
-    /**
-     * Check if the [OnlinePlayerService] service is currently running.
-     */
-    fun isBackgroundServiceRunning(
-        context: Context,
-        serviceClass: Class<*> = OnlinePlayerService::class.java
-    ): Boolean {
-        @Suppress("DEPRECATION")
-        return context.getSystemService<ActivityManager>()!!.getRunningServices(Int.MAX_VALUE)
-            .any { serviceClass.name == it.service.className }
     }
 
     /**
@@ -96,19 +79,25 @@ object BackgroundHelper {
     fun playOnBackgroundOffline(
         context: Context,
         videoId: String?,
+        playlistId: String?,
         downloadTab: DownloadTab,
-        shuffle: Boolean = false
+        shuffle: Boolean = false,
+        sortOrder: DownloadSortingOrder? = null,
     ) {
         // whether the service is started from the MainActivity or NoInternetActivity
         val noInternet = ContextHelper.tryUnwrapActivity<NoInternetActivity>(context) != null
 
         val arguments = bundleOf(
             IntentData.videoId to videoId,
+            IntentData.playlistId to playlistId,
             IntentData.shuffle to shuffle,
             IntentData.downloadTab to downloadTab,
-            IntentData.noInternet to noInternet
+            IntentData.noInternet to noInternet,
+            IntentData.audioOnly to true,
+            IntentData.sortOptions to sortOrder,
         )
 
+        stopBackgroundPlay(context)
         startMediaService(context, OfflinePlayerService::class.java, arguments)
     }
 
@@ -117,7 +106,6 @@ object BackgroundHelper {
         context: Context,
         serviceClass: Class<*>,
         arguments: Bundle = Bundle.EMPTY,
-        sendStartCommand: Boolean = true,
         onController: (MediaController) -> Unit = {}
     ) {
         val sessionToken =
@@ -127,11 +115,51 @@ object BackgroundHelper {
             MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
             val controller = controllerFuture.get()
-            if (sendStartCommand) controller.sendCustomCommand(
+            if (!arguments.isEmpty) controller.sendCustomCommand(
                 AbstractPlayerService.startServiceCommand,
                 arguments
             )
             onController(controller)
         }, MoreExecutors.directExecutor())
+    }
+
+    /**
+     * Get the service class of the currently active player based on the playing queue mode
+     */
+    fun getCurrentPlayerServiceClass(): Class<*> {
+        return if (PlayingQueue.queueMode == PlayingQueueMode.OFFLINE) {
+            OfflinePlayerService::class.java
+        } else {
+            OnlinePlayerService::class.java
+        }
+    }
+
+    /**
+     * Start a media service for the currently active player (online or offline)
+     * and pass the MediaController to the callback
+     */
+    fun startCurrentMediaService(
+        context: Context,
+        arguments: Bundle = Bundle.EMPTY,
+        onController: (MediaController) -> Unit = {}
+    ) {
+        startMediaService(context, getCurrentPlayerServiceClass(), arguments, onController)
+    }
+
+
+    /**
+     * Set the volume of the currently active player
+     *
+     * @param context the current context
+     * @param volume the volume level to set (0.0 to 1.0)
+     */
+    fun setVolume(context: Context, volume: Float) {
+        startCurrentMediaService(context, Bundle.EMPTY) { controller ->
+            try {
+                controller.volume = volume.coerceIn(0f, 1f)
+            } finally {
+                controller.release()
+            }
+        }
     }
 }

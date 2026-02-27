@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.os.Bundle
 import android.widget.Toast
 import androidx.core.os.bundleOf
+import androidx.core.view.isVisible
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import androidx.lifecycle.lifecycleScope
@@ -22,6 +23,15 @@ class CreatePlaylistDialog : DialogFragment() {
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val binding = DialogCreatePlaylistBinding.inflate(layoutInflater)
 
+        binding.createPlaylistSpinner.items = listOf(
+            getString(R.string.createNewPlaylist),
+            getString(R.string.clonePlaylist)
+        )
+        binding.createPlaylistSpinner.setOnSelectionChangeListener { position ->
+            binding.createPlayistContainerView.isVisible = position == 0
+            binding.clonePlaylistContainerView.isVisible = position == 1
+        }
+
         binding.clonePlaylist.setOnClickListener {
             val playlistUrl = binding.playlistUrl.text.toString().toHttpUrlOrNull()
             val appContext = context?.applicationContext
@@ -37,7 +47,10 @@ class CreatePlaylistDialog : DialogFragment() {
                     if (playlistId != null) {
                         setFragmentResult(
                             CREATE_PLAYLIST_DIALOG_REQUEST_KEY,
-                            bundleOf(IntentData.playlistTask to true)
+                            bundleOf(
+                                IntentData.playlistTask to true,
+                                IntentData.playlistId to playlistId
+                            ),
                         )
                     }
                     appContext?.toastFromMainDispatcher(
@@ -69,7 +82,10 @@ class CreatePlaylistDialog : DialogFragment() {
                     playlistId?.let {
                         setFragmentResult(
                             CREATE_PLAYLIST_DIALOG_REQUEST_KEY,
-                            bundleOf(IntentData.playlistTask to true)
+                            bundleOf(
+                                IntentData.playlistTask to true,
+                                IntentData.playlistId to playlistId
+                            )
                         )
                     }
                     dismiss()
@@ -79,10 +95,17 @@ class CreatePlaylistDialog : DialogFragment() {
             }
         }
 
+        binding.cancelCreate.setOnClickListener {
+            dialog?.cancel()
+        }
+
+        binding.cancelClone.setOnClickListener {
+            dialog?.cancel()
+        }
+
         return MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.createPlaylist)
             .setView(binding.root)
-            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 

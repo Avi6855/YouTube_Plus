@@ -2,8 +2,10 @@ package com.avinashpatil.app.youtube.services
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.core.net.toUri
 import androidx.core.os.bundleOf
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaItem.SubtitleConfiguration
 import androidx.media3.common.MimeTypes
@@ -12,27 +14,32 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.api.JsonHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
-import com.avinashpatil.app.youtube.api.StreamsExtractor
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
+import com.avinashpatil.app.youtube.api.SubscriptionHelper
 import com.avinashpatil.app.youtube.api.obj.Segment
 import com.avinashpatil.app.youtube.api.obj.Streams
 import com.avinashpatil.app.youtube.constants.IntentData
-import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.db.DatabaseHelper
 import com.avinashpatil.app.youtube.enums.PlayerCommand
+import com.avinashpatil.app.youtube.enums.SbSkipOptions
+import com.avinashpatil.app.youtube.extensions.TAG
 import com.avinashpatil.app.youtube.extensions.parcelable
 import com.avinashpatil.app.youtube.extensions.setMetadata
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.extensions.toastFromMainThread
+import com.avinashpatil.app.youtube.extensions.updateParameters
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
-import com.avinashpatil.app.youtube.helpers.PlayerHelper.checkForSegments
-import com.avinashpatil.app.youtube.helpers.PreferenceHelper
+import com.avinashpatil.app.youtube.helpers.PlayerHelper.getCurrentSegment
+import com.avinashpatil.app.youtube.helpers.PlayerHelper.getSubtitleRoleFlags
 import com.avinashpatil.app.youtube.helpers.ProxyHelper
 import com.avinashpatil.app.youtube.parcelable.PlayerData
+import com.avinashpatil.app.youtube.util.DeArrowUtil
 import com.avinashpatil.app.youtube.util.PlayingQueue
 import com.avinashpatil.app.youtube.util.YoutubeHlsPlaylistParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -43,12 +50,11 @@ import kotlinx.serialization.encodeToString
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 open class OnlinePlayerService : AbstractPlayerService() {
     override val isOfflinePlayer: Boolean = false
-    override val isAudioOnlyPlayer: Boolean = true
 
     // PlaylistId/ChannelId for autoplay
     private var playlistId: String? = null
     private var channelId: String? = null
-    private var startTimestamp: Long? = null
+    private var startTimestampSeconds: Long? = null
 
     /**
      * The response that gets when called the Api.
@@ -63,6 +69,11 @@ open class OnlinePlayerService : AbstractPlayerService() {
     private var autoPlayCountdownEnabled = false
 
     private val scope = CoroutineScope(Dispatchers.IO)
+
+    /*
+    Current job that's loading a new video (the value is null if no video is loading at the moment).
+     */
+    private var fetchVideoInfoJob: Job? = null
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -80,11 +91,13 @@ open class OnlinePlayerService : AbstractPlayerService() {
                     // save video to watch history when the video starts playing or is being resumed
                     // waiting for the player to be ready since the video can't be claimed to be watched
                     // while it did not yet start actually, but did buffer only so far
-                    scope.launch(Dispatchers.IO) {
-                        streams?.let { streams ->
-                            val watchHistoryItem =
-                                streams.toStreamItem(videoId).toWatchHistoryItem(videoId)
-                            DatabaseHelper.addToWatchHistory(watchHistoryItem)
+                    if (PlayerHelper.watchHistoryEnabled) {
+                        scope.launch(Dispatchers.IO) {
+                            streams?.let { streams ->
+                                val watchHistoryItem =
+                                    streams.toStreamItem(videoId).toWatchHistoryItem(videoId)
+                                DatabaseHelper.addToWatchHistory(watchHistoryItem)
+                            }
                         }
                     }
                 }
@@ -98,62 +111,72 @@ open class OnlinePlayerService : AbstractPlayerService() {
             stopSelf()
             return
         }
+        isAudioOnlyPlayer = args.getBoolean(IntentData.audioOnly)
 
         // get the intent arguments
-        setVideoId(playerData.videoId)
+        videoId = playerData.videoId
         playlistId = playerData.playlistId
         channelId = playerData.channelId
-        startTimestamp = playerData.timestamp
+        startTimestampSeconds = playerData.timestamp
 
         if (!playerData.keepQueue) PlayingQueue.clear()
 
         exoPlayer?.addListener(playerListener)
+        trackSelector?.updateParameters {
+            setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, isAudioOnlyPlayer)
+        }
     }
 
     override suspend fun startPlayback() {
         super.startPlayback()
 
-        val timestamp = startTimestamp ?: 0L
-        startTimestamp = null
+        val timestampMs = startTimestampSeconds?.times(1000) ?: 0L
+        startTimestampSeconds = null
 
-        streams = withContext(Dispatchers.IO) {
-            try {
-                StreamsExtractor.extractStreams(videoId)
-            } catch (e: Exception) {
-                val errorMessage =
-                    StreamsExtractor.getExtractorErrorMessageString(this@OnlinePlayerService, e)
-                this@OnlinePlayerService.toastFromMainDispatcher(errorMessage)
-                return@withContext null
+        // stop any previous task for loading video info
+        fetchVideoInfoJob?.cancelAndJoin()
+
+        // start loading the video info while keeping a reference to the job
+        // so that it can be canceled once a different video is loaded
+        fetchVideoInfoJob = scope.launch {
+            streams = withContext(Dispatchers.IO) {
+                try {
+                    MediaServiceRepository.instance.getStreams(videoId).let {
+                        DeArrowUtil.deArrowStreams(it, videoId)
+                    }
+                }  catch (e: Exception) {
+                    Log.e(TAG(), e.stackTraceToString())
+                    toastFromMainDispatcher(e.localizedMessage.orEmpty())
+                    return@withContext null
+                }
+            } ?: return@launch
+
+            streams?.toStreamItem(videoId)?.let {
+                // save the current stream to the queue
+                PlayingQueue.updateCurrent(it)
+
+                if (!PlayingQueue.hasNext()) {
+                    PlayingQueue.updateQueue(it, playlistId, channelId, streams!!.relatedStreams)
+                }
+
+                // update feed item with newer information, e.g. more up-to-date views
+                SubscriptionHelper.submitFeedItemChange(it.toFeedItem())
             }
-        } ?: return
 
-        if (PlayingQueue.isEmpty()) {
-            PlayingQueue.updateQueue(
-                streams!!.toStreamItem(videoId),
-                playlistId,
-                channelId,
-                streams!!.relatedStreams
-            )
-        } else if (PlayingQueue.isLast() && playlistId == null && channelId == null) {
-            PlayingQueue.insertRelatedStreams(streams!!.relatedStreams)
+            withContext(Dispatchers.Main) {
+                setStreamSource()
+                configurePlayer(timestampMs)
+            }
         }
 
-        // save the current stream to the queue
-        streams?.toStreamItem(videoId)?.let {
-            PlayingQueue.updateCurrent(it)
-        }
-
-        withContext(Dispatchers.Main) {
-            playAudio(timestamp)
-        }
+        fetchVideoInfoJob?.join()
+        fetchVideoInfoJob = null
     }
 
-    private fun playAudio(seekToPosition: Long) {
-        setStreamSource()
-
+    private fun configurePlayer(seekToPositionMs: Long) {
         // seek to the previous position if available
-        if (seekToPosition != 0L) {
-            exoPlayer?.seekTo(seekToPosition)
+        if (seekToPositionMs != 0L) {
+            exoPlayer?.seekTo(seekToPositionMs)
         } else if (watchPositionsEnabled) {
             DatabaseHelper.getWatchPositionBlocking(videoId)?.let {
                 if (!DatabaseHelper.isVideoWatched(it, streams?.duration)) exoPlayer?.seekTo(it)
@@ -184,13 +207,7 @@ open class OnlinePlayerService : AbstractPlayerService() {
         val nextVideo = nextId ?: PlayingQueue.getNext() ?: return
 
         // play new video on background
-        setVideoId(nextVideo)
-        this.streams = null
-        this.sponsorBlockSegments = emptyList()
-
-        scope.launch {
-            startPlayback()
-        }
+        navigateVideo(nextVideo)
     }
 
     /**
@@ -199,10 +216,10 @@ open class OnlinePlayerService : AbstractPlayerService() {
     private fun fetchSponsorBlockSegments() = scope.launch(Dispatchers.IO) {
         runCatching {
             if (sponsorBlockConfig.isEmpty()) return@runCatching
-            sponsorBlockSegments = RetrofitInstance.api.getSegments(
+            sponsorBlockSegments = MediaServiceRepository.instance.getSegments(
                 videoId,
-                JsonHelper.json.encodeToString(sponsorBlockConfig.keys),
-                """["skip","mute","full","poi","chapter"]"""
+                sponsorBlockConfig.keys.toList(),
+                listOf("skip", "mute", "full", "poi", "chapter")
             ).segments
 
             withContext(Dispatchers.Main) {
@@ -224,12 +241,17 @@ open class OnlinePlayerService : AbstractPlayerService() {
     private fun checkForSegments() {
         handler.postDelayed(this::checkForSegments, 100)
 
-        exoPlayer?.checkForSegments(
-            this,
+        val (currentSegment, sbSkipOption) = exoPlayer?.getCurrentSegment(
             sponsorBlockSegments,
-            sponsorBlockConfig,
-            skipAutomaticallyIfEnabled = sponsorBlockAutoSkip
-        )
+            sponsorBlockConfig
+        ) ?: return
+
+        if (sbSkipOption in arrayOf(SbSkipOptions.AUTOMATIC, SbSkipOptions.AUTOMATIC_ONCE) && sponsorBlockAutoSkip) {
+            exoPlayer?.seekTo(currentSegment.segmentStartAndEnd.second.toLong() * 1000)
+            currentSegment.skipped = true
+
+            if (PlayerHelper.sponsorBlockNotifications) toastFromMainThread(R.string.segment_skipped)
+        }
     }
 
     override fun runPlayerCommand(args: Bundle) {
@@ -243,6 +265,13 @@ open class OnlinePlayerService : AbstractPlayerService() {
         }
     }
 
+    override fun navigateVideo(videoId: String) {
+        this.streams = null
+        this.sponsorBlockSegments = emptyList()
+
+        super.navigateVideo(videoId)
+    }
+
     /**
      * Sets the [MediaItem] with the [streams] into the [exoPlayer]
      */
@@ -250,23 +279,8 @@ open class OnlinePlayerService : AbstractPlayerService() {
         val streams = streams ?: return
 
         when {
-            // LBRY HLS
-            PreferenceHelper.getBoolean(
-                PreferenceKeys.LBRY_HLS,
-                false
-            ) && streams.videoStreams.any {
-                it.quality.orEmpty().contains("LBRY HLS")
-            } -> {
-                val lbryHlsUrl = streams.videoStreams.first {
-                    it.quality!!.contains("LBRY HLS")
-                }.url!!
-
-                val mediaItem =
-                    createMediaItem(lbryHlsUrl.toUri(), MimeTypes.APPLICATION_M3U8, streams)
-                exoPlayer?.setMediaItem(mediaItem)
-            }
             // DASH
-            !PlayerHelper.useHlsOverDash && streams.videoStreams.isNotEmpty() -> {
+            streams.videoStreams.isNotEmpty() -> {
                 // only use the dash manifest generated by YT if either it's a livestream or no other source is available
                 val dashUri =
                     if (streams.isLive && streams.dash != null) {
@@ -274,14 +288,13 @@ open class OnlinePlayerService : AbstractPlayerService() {
                             streams.dash
                         ).toUri()
                     } else {
-                        // skip LBRY urls when checking whether the stream source is usable
                         PlayerHelper.createDashSource(streams, this)
                     }
 
                 val mediaItem = createMediaItem(dashUri, MimeTypes.APPLICATION_MPD, streams)
                 exoPlayer?.setMediaItem(mediaItem)
             }
-            // HLS
+            // HLS as last fallback
             streams.hls != null -> {
                 val hlsMediaSourceFactory = HlsMediaSource.Factory(DefaultDataSource.Factory(this))
                     .setPlaylistParserFactory(YoutubeHlsPlaylistParser.Factory())

@@ -7,15 +7,15 @@ import androidx.preference.SwitchPreferenceCompat
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
-//import com.avinashpatil.app.youtube.ui.adapters.IconsSheetAdapter
+import com.avinashpatil.app.youtube.ui.adapters.IconsSheetAdapter
 import com.avinashpatil.app.youtube.ui.base.BasePreferenceFragment
 import com.avinashpatil.app.youtube.ui.dialogs.NavBarOptionsDialog
 import com.avinashpatil.app.youtube.ui.dialogs.RequireRestartDialog
 import com.avinashpatil.app.youtube.ui.sheets.IconsBottomSheet
 import com.google.android.material.color.DynamicColors
+import org.schabi.newpipe.extractor.timeago.patterns.it
 
 class AppearanceSettings : BasePreferenceFragment() {
-    override val titleResourceId: Int = R.string.appearance
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.appearance_settings, rootKey)
 
@@ -37,7 +37,7 @@ class AppearanceSettings : BasePreferenceFragment() {
             RequireRestartDialog().show(childFragmentManager, RequireRestartDialog::class.java.name)
             true
         }
-/*
+
         val changeIcon = findPreference<Preference>(PreferenceKeys.APP_ICON)
         val iconPref = PreferenceHelper.getString(
             PreferenceKeys.APP_ICON,
@@ -50,7 +50,7 @@ class AppearanceSettings : BasePreferenceFragment() {
             IconsBottomSheet().show(childFragmentManager)
             true
         }
-*/
+
         val labelVisibilityMode = findPreference<ListPreference>(PreferenceKeys.LABEL_VISIBILITY)
         labelVisibilityMode?.setOnPreferenceChangeListener { _, _ ->
             RequireRestartDialog().show(childFragmentManager, RequireRestartDialog::class.java.name)
@@ -60,16 +60,6 @@ class AppearanceSettings : BasePreferenceFragment() {
         val navBarOptions = findPreference<Preference>(PreferenceKeys.NAVBAR_ITEMS)
         navBarOptions?.setOnPreferenceClickListener {
             NavBarOptionsDialog().show(childFragmentManager, null)
-            true
-        }
-
-        val legacySubscriptionView =
-            findPreference<SwitchPreferenceCompat>(PreferenceKeys.LEGACY_SUBSCRIPTIONS)
-        val legacySubscriptionColumns =
-            findPreference<ListPreference>(PreferenceKeys.LEGACY_SUBSCRIPTIONS_COLUMNS)
-        legacySubscriptionColumns?.isVisible = legacySubscriptionView?.isChecked!!
-        legacySubscriptionView.setOnPreferenceChangeListener { _, newValue ->
-            legacySubscriptionColumns?.isVisible = newValue as Boolean
             true
         }
     }

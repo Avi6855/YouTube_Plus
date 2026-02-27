@@ -35,7 +35,6 @@ data class Streams(
     val metaInfo: List<MetaInfo> = emptyList(),
     val hls: String? = null,
     val dash: String? = null,
-    val lbryId: String? = null,
     val uploaderVerified: Boolean,
     val duration: Long,
     val views: Long = 0,
@@ -55,21 +54,21 @@ data class Streams(
     val isLive = livestream || duration <= 0
 
     fun toDownloadItems(downloadData: DownloadData): List<DownloadItem> {
-        val (id, name, videoFormat, videoQuality, audioFormat, audioQuality, audioTrackLocale, subCode) = downloadData
+        val (id, videoFormat, videoQuality, audioFormat, audioQuality, audioTrackLocale, subCode) = downloadData
         val items = mutableListOf<DownloadItem>()
 
         if (!videoQuality.isNullOrEmpty() && !videoFormat.isNullOrEmpty()) {
             val stream = videoStreams.find {
                 it.quality == videoQuality && it.format == videoFormat
             }
-            stream?.toDownloadItem(FileType.VIDEO, id, name)?.let { items.add(it) }
+            stream?.toDownloadItem(FileType.VIDEO, id)?.let { items.add(it) }
         }
 
         if (!audioQuality.isNullOrEmpty() && !audioFormat.isNullOrEmpty()) {
             val stream = audioStreams.find {
                 it.quality == audioQuality && it.format == audioFormat && it.audioTrackLocale == audioTrackLocale
             }
-            stream?.toDownloadItem(FileType.AUDIO, id, name)?.let { items.add(it) }
+            stream?.toDownloadItem(FileType.AUDIO, id)?.let { items.add(it) }
         }
 
         if (!subCode.isNullOrEmpty()) {

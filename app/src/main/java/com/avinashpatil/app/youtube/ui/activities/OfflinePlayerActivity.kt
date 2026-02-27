@@ -14,9 +14,11 @@ import androidx.core.os.bundleOf
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.TimeBar
 import com.avinashpatil.app.youtube.compat.PictureInPictureCompat
 import com.avinashpatil.app.youtube.compat.PictureInPictureParamsCompat
 import com.avinashpatil.app.youtube.constants.IntentData
@@ -32,8 +34,9 @@ import com.avinashpatil.app.youtube.helpers.BackgroundHelper
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.helpers.WindowHelper
 import com.avinashpatil.app.youtube.services.AbstractPlayerService
-import com.avinashpatil.app.youtube.services.VideoOfflinePlayerService
+import com.avinashpatil.app.youtube.services.OfflinePlayerService
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
+import com.avinashpatil.app.youtube.ui.fragments.DownloadSortingOrder
 import com.avinashpatil.app.youtube.ui.fragments.DownloadTab
 import com.avinashpatil.app.youtube.ui.interfaces.TimeFrameReceiver
 import com.avinashpatil.app.youtube.ui.listeners.SeekbarPreviewListener
@@ -54,6 +57,7 @@ class OfflinePlayerActivity : BaseActivity() {
     private lateinit var playerController: MediaController
     private lateinit var playerView: PlayerView
     private var timeFrameReceiver: TimeFrameReceiver? = null
+    private var seekBarPreviewListener: TimeBar.OnScrubListener? = null
 
     private lateinit var playerBinding: ExoStyledPlayerControlViewBinding
     private val commonPlayerViewModel: CommonPlayerViewModel by viewModels()
@@ -63,9 +67,11 @@ class OfflinePlayerActivity : BaseActivity() {
         override fun onEvents(player: Player, events: Player.Events) {
             super.onEvents(player, events)
             // update the displayed duration on changes
-            playerBinding.duration.text = DateUtils.formatElapsedTime(
-                player.duration / 1000
-            )
+            if (::playerBinding.isInitialized && player.duration >= 0) {
+                playerBinding.duration.text = DateUtils.formatElapsedTime(
+                    player.duration / 1000
+                )
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -88,14 +94,19 @@ class OfflinePlayerActivity : BaseActivity() {
             super.onPlaybackStateChanged(playbackState)
             // setup seekbar preview
             if (playbackState == Player.STATE_READY) {
-                binding.player.binding.exoProgress.addSeekBarListener(
-                    SeekbarPreviewListener(
-                        timeFrameReceiver ?: return,
-                        binding.player.binding,
-                        playerController.duration
-                    )
-                )
+                with(binding.player.binding.exoProgress) {
+                    seekBarPreviewListener?.let { removeSeekBarListener(it) }
+                    seekBarPreviewListener = createSeekBarPreviewListener()
+                    seekBarPreviewListener?.let { addSeekBarListener(it) }
+                }
             }
+        }
+
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            super.onMediaMetadataChanged(mediaMetadata)
+
+            mediaMetadata.extras?.getString(IntentData.videoId)?.let { videoId = it }
+            lifecycleScope.launch { loadPlayerData() }
         }
     }
 
@@ -132,16 +143,24 @@ class OfflinePlayerActivity : BaseActivity() {
 
         super.onCreate(savedInstanceState)
 
-        videoId = intent?.getStringExtra(IntentData.videoId)!!
+        val videoId = intent?.getStringExtra(IntentData.videoId)
+        val playlistId = intent?.getStringExtra(IntentData.playlistId)
+        val shuffle = intent?.getBooleanExtra(IntentData.shuffle, false)
+        val sortOrder = intent?.serializableExtra<DownloadSortingOrder>(IntentData.sortOptions)
 
         binding = ActivityOfflinePlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val downloadTab = if (playlistId == null) DownloadTab.VIDEO else DownloadTab.PLAYLIST
         val arguments = bundleOf(
-            IntentData.downloadTab to DownloadTab.VIDEO,
-            IntentData.videoId to videoId
+            IntentData.downloadTab to downloadTab,
+            IntentData.videoId to videoId,
+            IntentData.playlistId to playlistId,
+            IntentData.shuffle to shuffle,
+            IntentData.sortOptions to sortOrder,
+            IntentData.audioOnly to false
         )
-        BackgroundHelper.startMediaService(this, VideoOfflinePlayerService::class.java, arguments) {
+        BackgroundHelper.startMediaService(this, OfflinePlayerService::class.java, arguments) {
             playerController = it
             playerController.addListener(playerListener)
             initializePlayerView()
@@ -188,28 +207,33 @@ class OfflinePlayerActivity : BaseActivity() {
             playNextVideo(PlayingQueue.getNext() ?: return@setOnClickListener)
         }
 
-        binding.player.initialize(
-            binding.doubleTapOverlay.binding,
-            binding.playerGestureControlsView.binding,
-            chaptersViewModel
+        binding.player.initialize(chaptersViewModel)
+    }
+
+    private fun createSeekBarPreviewListener(): TimeBar.OnScrubListener? {
+        return SeekbarPreviewListener(
+            timeFrameReceiver ?: return null,
+            binding.player.binding,
+            playerController.duration
         )
+    }
 
-        lifecycleScope.launch {
-            val (downloadInfo, downloadItems, downloadChapters) = withContext(Dispatchers.IO) {
-                Database.downloadDao().findById(videoId)
-            }!!
+    private suspend fun loadPlayerData() {
+        val (downloadInfo, downloadItems, downloadChapters) = withContext(Dispatchers.IO) {
+            Database.downloadDao().findById(videoId)
+        }!!
 
-            val chapters = downloadChapters.map(DownloadChapter::toChapterSegment)
-            chaptersViewModel.chaptersLiveData.value = chapters
-            binding.player.setChapters(chapters)
+        val chapters = downloadChapters.map(DownloadChapter::toChapterSegment)
+        chaptersViewModel.chaptersLiveData.value = chapters
+        binding.player.setChapters(chapters)
 
-            playerBinding.exoTitle.text = downloadInfo.title
-            playerBinding.exoTitle.isVisible = true
+        playerBinding.exoTitle.text = downloadInfo.title
+        playerBinding.exoTitle.isVisible = true
 
-            timeFrameReceiver = downloadItems.firstOrNull { it.path.exists() && it.type == FileType.VIDEO }?.path?.let {
+        timeFrameReceiver =
+            downloadItems.firstOrNull { it.path.exists() && it.type == FileType.VIDEO }?.path?.let {
                 OfflineTimeFrameReceiver(this@OfflinePlayerActivity, it)
             }
-        }
     }
 
     override fun onResume() {
@@ -227,7 +251,10 @@ class OfflinePlayerActivity : BaseActivity() {
     }
 
     override fun onDestroy() {
-        playerController.sendCustomCommand(AbstractPlayerService.stopServiceCommand, Bundle.EMPTY)
+        playerController.sendCustomCommand(
+            AbstractPlayerService.stopServiceCommand,
+            Bundle.EMPTY
+        )
 
         runCatching {
             unregisterReceiver(playerActionReceiver)
@@ -259,7 +286,7 @@ class OfflinePlayerActivity : BaseActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (binding.player.onKeyBoardAction(keyCode)) {
+        if (binding.player.onKeyUp(keyCode, event)) {
             return true
         }
 

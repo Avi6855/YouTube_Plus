@@ -32,7 +32,6 @@ import com.avinashpatil.app.youtube.ui.adapters.PlaylistsAdapter
 import com.avinashpatil.app.youtube.ui.base.DynamicLayoutManagerFragment
 import com.avinashpatil.app.youtube.ui.dialogs.CreatePlaylistDialog
 import com.avinashpatil.app.youtube.ui.dialogs.CreatePlaylistDialog.Companion.CREATE_PLAYLIST_DIALOG_REQUEST_KEY
-import com.avinashpatil.app.youtube.ui.extensions.setupFragmentAnimation
 import com.avinashpatil.app.youtube.ui.models.CommonPlayerViewModel
 import com.avinashpatil.app.youtube.ui.sheets.BaseBottomSheet
 import kotlinx.coroutines.Dispatchers
@@ -81,12 +80,12 @@ class LibraryFragment : DynamicLayoutManagerFragment(R.layout.fragment_library) 
             binding.watchHistory.isGone = true
         } else {
             binding.watchHistory.setOnClickListener {
-                findNavController().navigate(R.id.watchHistoryFragment)
+                findNavController().navigate(R.id.action_libraryFragment_to_watchHistoryFragment)
             }
         }
 
         binding.downloads.setOnClickListener {
-            findNavController().navigate(R.id.downloadsFragment)
+            findNavController().navigate(R.id.action_libraryFragment_to_downloadsFragment)
         }
 
         val navBarItems = NavBarHelper.getNavBarItems(requireContext())
@@ -136,10 +135,6 @@ class LibraryFragment : DynamicLayoutManagerFragment(R.layout.fragment_library) 
                 }
             }.show(childFragmentManager)
         }
-
-        if (NavBarHelper.getStartFragmentId(requireContext()) != R.id.libraryFragment) {
-            setupFragmentAnimation(binding.root)
-        }
     }
 
     override fun onDestroyView() {
@@ -155,7 +150,7 @@ class LibraryFragment : DynamicLayoutManagerFragment(R.layout.fragment_library) 
 
             val binding = _binding ?: return@launch
 
-            binding.bookmarksCV.isVisible = bookmarks.isNotEmpty()
+            binding.bookmarksContainer.isVisible = bookmarks.isNotEmpty()
             if (bookmarks.isNotEmpty()) {
                 playlistBookmarkAdapter.submitList(bookmarks)
             }
@@ -186,9 +181,10 @@ class LibraryFragment : DynamicLayoutManagerFragment(R.layout.fragment_library) 
                 val binding = _binding ?: return@repeatOnLifecycle
                 binding.playlistRefresh.isRefreshing = false
 
-                if (playlists.isNotEmpty()) {
-                    showPlaylists(playlists)
-                } else {
+                // also update playlists recycler when the playlists are empty in order to remove
+                // playlists that were removed by the user
+                showPlaylists(playlists)
+                if (playlists.isEmpty()) {
                     binding.sortTV.isVisible = false
                     binding.nothingHere.isVisible = true
                 }

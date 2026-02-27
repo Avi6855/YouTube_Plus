@@ -1,68 +1,86 @@
 package com.avinashpatil.app.youtube.ui.extensions
 
 import android.widget.TextView
-import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.api.SubscriptionHelper
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+
 fun TextView.setupSubscriptionButton(
     channelId: String?,
-    channelName: String?,
+    channelName: String,
+    channelAvatar: String?,
+    channelVerified: Boolean,
     notificationBell: MaterialButton? = null,
     isSubscribed: Boolean? = null,
     onIsSubscribedChange: (Boolean) -> Unit = {}
 ) {
     if (channelId == null) return
 
-    var subscribed: Boolean? = false
+    val notificationsEnabled = PreferenceHelper
+        .getBoolean(PreferenceKeys.NOTIFICATION_ENABLED, true)
+    var subscribed = false
+
+    fun updateUIStateAndNotifyObservers() {
+        onIsSubscribedChange(subscribed)
+
+        this@setupSubscriptionButton.text =
+            if (subscribed) context.getString(R.string.unsubscribe)
+            else context.getString(R.string.subscribe)
+
+        notificationBell?.isVisible = subscribed && notificationsEnabled
+        this@setupSubscriptionButton.isVisible = true
+    }
 
     CoroutineScope(Dispatchers.IO).launch {
-        subscribed = isSubscribed ?: SubscriptionHelper.isSubscribed(channelId)
+        subscribed = isSubscribed ?: SubscriptionHelper.isSubscribed(channelId) ?: false
 
         withContext(Dispatchers.Main) {
-            subscribed?.let { subscribed -> onIsSubscribedChange(subscribed) }
-
-            if (subscribed == true) {
-                this@setupSubscriptionButton.text = context.getString(R.string.unsubscribe)
-            } else {
-                notificationBell?.isGone = true
-            }
-            this@setupSubscriptionButton.isVisible = true
+            updateUIStateAndNotifyObservers()
         }
     }
 
     notificationBell?.setupNotificationBell(channelId)
 
+    val setSubscriptionState : (Boolean) -> Unit = { subscribe ->
+        CoroutineScope(Dispatchers.IO).launch {
+            if (subscribe)
+                SubscriptionHelper.subscribe(
+                    channelId,
+                    channelName,
+                    channelAvatar,
+                    channelVerified
+                )
+            else
+                SubscriptionHelper.unsubscribe(channelId)
+        }
+        subscribed = subscribe
+
+        updateUIStateAndNotifyObservers()
+    }
+
     setOnClickListener {
-        if (subscribed == true) {
-            SubscriptionHelper.handleUnsubscribe(context, channelId, channelName) {
-                text = context.getString(R.string.subscribe)
-                notificationBell?.isGone = true
-
-                subscribed = false
-                onIsSubscribedChange(false)
+        CoroutineScope(Dispatchers.Main).launch {
+            if (subscribed) {
+                Snackbar
+                    .make(
+                        rootView,
+                        context.getString(R.string.unsubscribe_snackbar_message, channelName),
+                        1000
+                    )
+                    .setAction(R.string.undo, {
+                        setSubscriptionState(true)
+                    }).show()
             }
-        } else {
-            CoroutineScope(Dispatchers.Main).launch {
-                withContext(Dispatchers.IO) {
-                    SubscriptionHelper.subscribe(channelId)
-                }
-
-                text = context.getString(R.string.unsubscribe)
-                notificationBell?.isVisible = PreferenceHelper
-                    .getBoolean(PreferenceKeys.NOTIFICATION_ENABLED, true)
-
-                subscribed = true
-                onIsSubscribedChange(true)
-            }
+            setSubscriptionState(!subscribed)
         }
     }
 }

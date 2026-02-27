@@ -1,5 +1,6 @@
 package com.avinashpatil.app.youtube.helpers
 
+import com.avinashpatil.app.youtube.api.PipedMediaServiceRepository
 import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import kotlinx.coroutines.CoroutineScope
@@ -11,9 +12,10 @@ object ProxyHelper {
     fun fetchProxyUrl() {
         CoroutineScope(Dispatchers.IO).launch {
             runCatching {
-                RetrofitInstance.api.getConfig().imageProxyUrl?.let {
-                    PreferenceHelper.putString(PreferenceKeys.IMAGE_PROXY_URL, it)
-                }
+                RetrofitInstance.externalApi.getInstanceConfig(PipedMediaServiceRepository.apiUrl)
+                    .imageProxyUrl?.let {
+                        PreferenceHelper.putString(PreferenceKeys.IMAGE_PROXY_URL, it)
+                    }
             }
         }
     }

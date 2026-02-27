@@ -8,6 +8,7 @@ import com.avinashpatil.app.youtube.api.obj.Subscription
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.ChannelSubscriptionRowBinding
 import com.avinashpatil.app.youtube.extensions.toID
+import com.avinashpatil.app.youtube.helpers.ContextHelper
 import com.avinashpatil.app.youtube.helpers.ImageHelper
 import com.avinashpatil.app.youtube.helpers.NavigationHelper
 import com.avinashpatil.app.youtube.ui.adapters.callbacks.DiffUtilItemCallback
@@ -18,9 +19,10 @@ import com.avinashpatil.app.youtube.ui.viewholders.SubscriptionChannelViewHolder
 
 class SubscriptionChannelAdapter :
     ListAdapter<Subscription, SubscriptionChannelViewHolder>(DiffUtilItemCallback()) {
-    private var visibleCount = 20
 
-    override fun getItemCount() = minOf(visibleCount, currentList.size)
+    // Track recently unsubscribed channels to preserve their unsubscribed state when
+    // [onBindViewHolder] is re-called on these channels while scrolling the [RecyclerView]
+    private val recentlyUnsubscribedList = mutableListOf<String>()
 
     override fun onCreateViewHolder(
         parent: ViewGroup,
@@ -29,13 +31,6 @@ class SubscriptionChannelAdapter :
         val layoutInflater = LayoutInflater.from(parent.context)
         val binding = ChannelSubscriptionRowBinding.inflate(layoutInflater, parent, false)
         return SubscriptionChannelViewHolder(binding)
-    }
-
-    fun updateItems() {
-        val oldSize = visibleCount
-        visibleCount += minOf(10, currentList.size - oldSize)
-        if (visibleCount == oldSize) return
-        notifyItemRangeInserted(oldSize, visibleCount)
     }
 
     override fun onBindViewHolder(holder: SubscriptionChannelViewHolder, position: Int) {
@@ -55,16 +50,26 @@ class SubscriptionChannelAdapter :
                     IntentData.channelName to subscription.name,
                     IntentData.isSubscribed to true
                 )
-                channelOptionsSheet.show((root.context as BaseActivity).supportFragmentManager)
+                val activity = ContextHelper.unwrapActivity<BaseActivity>(root.context)
+                channelOptionsSheet.show(activity.supportFragmentManager)
                 true
             }
 
+            val channelId = subscription.url.toID()
+            val isRecentlyUnsubscribed = recentlyUnsubscribedList.any { it == channelId }
             subscriptionSubscribe.setupSubscriptionButton(
-                subscription.url.toID(),
+                channelId,
                 subscription.name,
+                subscription.avatar,
+                subscription.verified,
                 notificationBell,
-                true
-            )
+                !isRecentlyUnsubscribed
+            ) { isSubscribed ->
+                when (isSubscribed) {
+                    true -> if (isRecentlyUnsubscribed) recentlyUnsubscribedList.remove(channelId)
+                    false -> if (!isRecentlyUnsubscribed) recentlyUnsubscribedList.add(channelId)
+                }
+            }
         }
     }
 }

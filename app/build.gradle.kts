@@ -1,6 +1,9 @@
+import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    //id("kotlin-android")
     id("kotlinx-serialization")
     id("kotlin-parcelize")
     id("androidx.navigation.safeargs.kotlin")
@@ -8,13 +11,28 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+/*
+'keystore.properties' should look like the following:
+
+storeFile=my.keystore
+storePassword=my_store_password
+keyAlias=my_key_alias
+keyPassword=my_key_password
+*/
+
+val keystoreProperties = Properties()
+val keystoreFileExists = rootProject.file("keystore.properties").exists()
+if (keystoreFileExists) {
+    keystoreProperties.load(rootProject.file("keystore.properties").inputStream())
+}
+
 android {
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.avinashpatil.app.youtube"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "0.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -30,10 +48,22 @@ android {
         enable = true
     }
 
+    signingConfigs {
+        if (keystoreFileExists) {
+            create("release") {
+                storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.findByName("release")?.takeIf { it.storeFile != null }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -53,8 +83,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+            javaParameters = true
+        }
     }
 
     // Comment this block if issues occur while generating the baseline profile
@@ -80,13 +113,17 @@ android {
 
     buildFeatures {
         buildConfig = true
+        resValues = true
     }
 
     dependenciesInfo {
-        // Disables dependency metadata when building APKs.
         includeInApk = false
-        // Disables dependency metadata when building Android App Bundles.
         includeInBundle = false
+    }
+
+    // Android 13+ language configuration
+    androidResources {
+        generateLocaleConfig = true
     }
 
     namespace = "com.avinashpatil.app.youtube"
@@ -97,11 +134,13 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.navigation.fragment)
     implementation(libs.androidx.navigation.ui)
     implementation(libs.androidx.preference)
+    implementation(libs.androidx.documentfile)
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.collection)
     implementation(libs.androidx.media)

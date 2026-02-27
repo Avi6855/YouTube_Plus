@@ -3,7 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:baselineAligned="false">
+    android:baselineAligned="false"
+    android:layoutDirection="ltr">
 
     <!-- double tap rewind btn -->
     <FrameLayout
@@ -16,29 +17,10 @@
         android:clipToPadding="false"
         android:focusable="false">
 
-        <FrameLayout
-            android:id="@+id/rewindBTN"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:visibility="invisible">
-
-            <ImageView
-                android:id="@+id/rewindIV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:src="@drawable/ic_rewind"
-                app:tint="@android:color/white" />
-
-            <TextView
-                android:id="@+id/rewindTV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:textColor="@android:color/white"
-                android:translationZ="1dp" />
-
-        </FrameLayout>
+        <include
+            android:id="@+id/rewindLayout"
+            layout="@layout/seek_button_rewind"
+            android:visibility="invisible" />
 
     </FrameLayout>
 
@@ -59,29 +41,10 @@
         android:clipToPadding="false"
         android:focusable="false">
 
-        <FrameLayout
-            android:id="@+id/forwardBTN"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:visibility="invisible">
-
-            <ImageView
-                android:id="@+id/forwardIV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:src="@drawable/ic_forward"
-                app:tint="@android:color/white" />
-
-            <TextView
-                android:id="@+id/forwardTV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:textColor="@android:color/white"
-                android:translationZ="1dp" />
-
-        </FrameLayout>
+        <include
+            android:id="@+id/forwardLayout"
+            layout="@layout/seek_button_forward"
+            android:visibility="invisible" />
 
     </FrameLayout>
 

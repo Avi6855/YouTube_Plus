@@ -3,44 +3,53 @@ package com.avinashpatil.app.youtube.ui.models
 import android.content.Context
 import android.os.Parcelable
 import android.util.Log
-import android.widget.Toast
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.RetrofitInstance
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
+import com.avinashpatil.app.youtube.api.TrendingCategory
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.extensions.TAG
-import com.avinashpatil.app.youtube.helpers.LocaleHelper
-import com.avinashpatil.app.youtube.util.deArrow
+import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
+import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
-import java.io.IOException
 
 class TrendsViewModel : ViewModel() {
-    val trendingVideos = MutableLiveData<List<StreamItem>>()
+    data class TrendingStreams(val region: String, val streams: List<StreamItem>)
+
+    val trendingVideos = MutableLiveData<Map<TrendingCategory, TrendingStreams>>()
     var recyclerViewState: Parcelable? = null
 
-    fun fetchTrending(context: Context) {
-        viewModelScope.launch {
+    private var currentJob: Job? = null
+
+    fun fetchTrending(context: Context, category: TrendingCategory) {
+        // cancel previously started, still running requests as users can only see one tab at a time,
+        // so it doesn't make sense to continue loading the previously seen (now hidden) tab data
+        runCatching { currentJob?.cancel() }
+
+        currentJob = viewModelScope.launch {
             try {
-                val region = LocaleHelper.getTrendingRegion(context)
+                val region = PreferenceHelper.getTrendingRegion(context)
                 val response = withContext(Dispatchers.IO) {
-                    RetrofitInstance.api.getTrending(region).deArrow()
+                    MediaServiceRepository.instance.getTrending(region, category)
                 }
-                trendingVideos.postValue(response)
-            } catch (e: IOException) {
-                println(e)
-                Log.e(TAG(), "IOException, you might not have internet connection")
-                Toast.makeText(context, R.string.unknown_error, Toast.LENGTH_SHORT).show()
-                return@launch
-            } catch (e: HttpException) {
-                Log.e(TAG(), "HttpException, unexpected response")
-                Toast.makeText(context, R.string.server_error, Toast.LENGTH_SHORT).show()
-                return@launch
+                setStreamsForCategory(category, TrendingStreams(region, response))
+            } catch (e: Exception) {
+                Log.e(TAG(), e.stackTraceToString())
+                context.toastFromMainDispatcher(e.localizedMessage.orEmpty())
             }
         }
+    }
+
+    fun setStreamsForCategory(category: TrendingCategory, streams: TrendingStreams) {
+        val newState = trendingVideos.value.orEmpty()
+            .toMutableMap()
+            .apply {
+                put(category, streams)
+            }
+        trendingVideos.postValue(newState)
     }
 }

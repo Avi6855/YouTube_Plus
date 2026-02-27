@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowManager
 import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.activityViewModels
@@ -13,6 +14,7 @@ import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.BottomSheetBinding
 import com.avinashpatil.app.youtube.ui.adapters.ChaptersAdapter
+import com.avinashpatil.app.youtube.ui.extensions.onSystemInsets
 import com.avinashpatil.app.youtube.ui.models.ChaptersViewModel
 
 class ChaptersBottomSheet : ExpandablePlayerSheet(R.layout.bottom_sheet) {
@@ -39,6 +41,17 @@ class ChaptersBottomSheet : ExpandablePlayerSheet(R.layout.bottom_sheet) {
             }
         binding.optionsRecycler.adapter = adapter
 
+        // add bottom padding to the list, to ensure that the last item is not overlapped by the system bars
+        binding.optionsRecycler.onSystemInsets { v, systemInsets ->
+            v.setPadding(
+                v.paddingLeft,
+                v.paddingTop,
+                v.paddingRight,
+                systemInsets.bottom
+            )
+        }
+
+
         binding.optionsRecycler.viewTreeObserver.addOnGlobalLayoutListener(
             object : ViewTreeObserver.OnGlobalLayoutListener {
                 override fun onGlobalLayout() {
@@ -61,7 +74,7 @@ class ChaptersBottomSheet : ExpandablePlayerSheet(R.layout.bottom_sheet) {
         binding.bottomSheetTitleLayout.isVisible = true
 
         chaptersViewModel.chaptersLiveData.observe(viewLifecycleOwner) {
-            adapter.chapters = it
+            adapter.chapters = it.orEmpty()
             adapter.notifyDataSetChanged()
         }
     }
@@ -71,6 +84,18 @@ class ChaptersBottomSheet : ExpandablePlayerSheet(R.layout.bottom_sheet) {
     override fun getDragHandle() = binding.dragHandle
 
     override fun getBottomSheet() = binding.standardBottomSheet
+
+    override fun onStart() {
+        super.onStart()
+        // remove internal padding from the bottomsheet
+        // https://github.com/material-components/material-components-android/issues/3389#issuecomment-2049028605
+        dialog?.window?.apply {
+            setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            )
+        }
+    }
 
     override fun onDestroyView() {
         super.onDestroyView()

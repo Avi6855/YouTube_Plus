@@ -4,22 +4,20 @@ import android.content.Context
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.api.SubscriptionHelper
+import com.avinashpatil.app.youtube.api.TrendingCategory
 import com.avinashpatil.app.youtube.api.obj.Playlists
 import com.avinashpatil.app.youtube.api.obj.StreamItem
-import com.avinashpatil.app.youtube.constants.PreferenceKeys.HIDE_WATCHED_FROM_FEED
+import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.db.DatabaseHelper
 import com.avinashpatil.app.youtube.db.DatabaseHolder
 import com.avinashpatil.app.youtube.db.obj.PlaylistBookmark
-import com.avinashpatil.app.youtube.enums.ContentFilter
 import com.avinashpatil.app.youtube.extensions.runSafely
 import com.avinashpatil.app.youtube.extensions.updateIfChanged
-import com.avinashpatil.app.youtube.helpers.LocaleHelper
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
-import com.avinashpatil.app.youtube.util.deArrow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -29,9 +27,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class HomeViewModel : ViewModel() {
-    private val hideWatched get() = PreferenceHelper.getBoolean(HIDE_WATCHED_FROM_FEED, false)
+    private val hideWatched get() = PreferenceHelper.getBoolean(PreferenceKeys.HIDE_WATCHED_FROM_FEED, false)
+    private val showUpcoming get() = PreferenceHelper.getBoolean(PreferenceKeys.SHOW_UPCOMING_IN_FEED, true)
 
-    val trending: MutableLiveData<List<StreamItem>> = MutableLiveData(null)
+    val trending: MutableLiveData<Pair<TrendingCategory, TrendsViewModel.TrendingStreams>> =
+        MutableLiveData(null)
     val feed: MutableLiveData<List<StreamItem>> = MutableLiveData(null)
     val bookmarks: MutableLiveData<List<PlaylistBookmark>> = MutableLiveData(null)
     val playlists: MutableLiveData<List<Playlists>> = MutableLiveData(null)
@@ -61,7 +61,7 @@ class HomeViewModel : ViewModel() {
                     async { if (visibleItems.contains(PLAYLISTS)) loadPlaylists() },
                     async { if (visibleItems.contains(WATCHING)) loadVideosToContinueWatching() }
                 )
-                loadedSuccessfully.value = sections.any { !it.value.isNullOrEmpty() }
+                loadedSuccessfully.value = sections.any { it.value != null }
                 isLoading.value = false
             }
 
@@ -74,18 +74,31 @@ class HomeViewModel : ViewModel() {
         }
     }
     private suspend fun loadTrending(context: Context) {
-        val region = LocaleHelper.getTrendingRegion(context)
+        val region = PreferenceHelper.getTrendingRegion(context)
+        val category = PreferenceHelper.getString(
+            PreferenceKeys.TRENDING_CATEGORY,
+            TrendingCategory.LIVE.name
+        ).let { TrendingCategory.valueOf(it) }
 
         runSafely(
-            onSuccess = { videos -> trending.updateIfChanged(videos) },
-            ioBlock = { RetrofitInstance.api.getTrending(region).deArrow().take(10) }
+            onSuccess = { videos ->
+                trending.updateIfChanged(
+                    Pair(
+                        category,
+                        TrendsViewModel.TrendingStreams(region, videos)
+                    )
+                )
+            },
+            ioBlock = {
+                MediaServiceRepository.instance.getTrending(region, category)
+            }
         )
     }
 
     private suspend fun loadFeed(subscriptionsViewModel: SubscriptionsViewModel) {
         runSafely(
             onSuccess = { videos -> feed.updateIfChanged(videos) },
-            ioBlock = { tryLoadFeed(subscriptionsViewModel).deArrow().take(20) }
+            ioBlock = { tryLoadFeed(subscriptionsViewModel) }
         )
     }
 
@@ -99,7 +112,7 @@ class HomeViewModel : ViewModel() {
     private suspend fun loadPlaylists() {
         runSafely(
             onSuccess = { newPlaylists -> playlists.updateIfChanged(newPlaylists) },
-            ioBlock = { PlaylistsHelper.getPlaylists().take(20) }
+            ioBlock = { PlaylistsHelper.getPlaylists() }
         )
     }
 
@@ -112,11 +125,10 @@ class HomeViewModel : ViewModel() {
     }
 
     private suspend fun loadWatchingFromDB(): List<StreamItem> {
-        val videos = DatabaseHelper.getWatchHistoryPage(1, 50)
+        val videos = DatabaseHelper.getWatchHistoryPage(1, 20)
 
         return DatabaseHelper
             .filterUnwatched(videos.map { it.toStreamItem() })
-            .take(20)
     }
 
     private suspend fun tryLoadFeed(subscriptionsViewModel: SubscriptionsViewModel): List<StreamItem> {
@@ -125,18 +137,7 @@ class HomeViewModel : ViewModel() {
         val feed = SubscriptionHelper.getFeed(forceRefresh = false)
         subscriptionsViewModel.videoFeed.postValue(feed)
 
-        return if (hideWatched) feed.filterWatched() else feed
-    }
-
-    private suspend fun List<StreamItem>.filterWatched(): List<StreamItem> {
-        val allowShorts = ContentFilter.SHORTS.isEnabled
-        val allowVideos = ContentFilter.VIDEOS.isEnabled
-        val allowAll = (!allowShorts && !allowVideos)
-
-        val filteredFeed = this.filter {
-            allowAll || (allowShorts && it.isShort) || (allowVideos && !it.isShort)
-        }
-        return DatabaseHelper.filterUnwatched(filteredFeed)
+        return DatabaseHelper.filterByStreamTypeAndWatchPosition(feed, hideWatched, showUpcoming)
     }
 
     companion object {

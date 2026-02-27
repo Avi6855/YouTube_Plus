@@ -5,10 +5,12 @@ import android.view.View
 import androidx.core.view.isVisible
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.asFlow
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.SubscriptionHelper
 import com.avinashpatil.app.youtube.api.obj.Subscription
 import com.avinashpatil.app.youtube.databinding.DialogEditChannelGroupBinding
 import com.avinashpatil.app.youtube.db.DatabaseHolder
@@ -18,9 +20,9 @@ import com.avinashpatil.app.youtube.ui.models.EditChannelGroupsModel
 import com.avinashpatil.app.youtube.ui.models.SubscriptionsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 
 class EditChannelGroupSheet : ExpandedBottomSheet(R.layout.dialog_edit_channel_group) {
     private var _binding: DialogEditChannelGroupBinding? = null
@@ -30,21 +32,23 @@ class EditChannelGroupSheet : ExpandedBottomSheet(R.layout.dialog_edit_channel_g
     private val channelGroupsModel: EditChannelGroupsModel by activityViewModels()
     private var channels = listOf<Subscription>()
 
-    private val channelsAdapter = SubscriptionGroupChannelsAdapter(
-        channelGroupsModel.groupToEdit!!
-    ) {
-        channelGroupsModel.groupToEdit = it
-        updateConfirmStatus()
-    }
+    private lateinit var channelsAdapter: SubscriptionGroupChannelsAdapter
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         _binding = DialogEditChannelGroupBinding.bind(view)
+
+        channelsAdapter = SubscriptionGroupChannelsAdapter(
+            channelGroupsModel.groupToEdit!!
+        ) {
+            channelGroupsModel.groupToEdit = it
+            updateConfirmStatus()
+        }
+
         binding.channelsRV.adapter = channelsAdapter
         binding.groupName.setText(channelGroupsModel.groupToEdit?.name)
         val oldGroupName = channelGroupsModel.groupToEdit?.name.orEmpty()
 
         binding.channelsRV.layoutManager = LinearLayoutManager(context)
-        fetchSubscriptions()
 
         binding.groupName.addTextChangedListener {
             updateConfirmStatus()
@@ -67,6 +71,22 @@ class EditChannelGroupSheet : ExpandedBottomSheet(R.layout.dialog_edit_channel_g
 
             dismiss()
         }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch(Dispatchers.IO) {
+                    subscriptionsModel.fetchSubscriptions(requireContext())
+                }
+                launch {
+                    subscriptionsModel.subscriptions.asFlow().collectLatest { subscriptions ->
+                        subscriptions?.let {
+                            channels = it
+                            showChannels(it, null)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun saveGroup(group: SubscriptionGroup, oldGroupName: String) {
@@ -86,22 +106,6 @@ class EditChannelGroupSheet : ExpandedBottomSheet(R.layout.dialog_edit_channel_g
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
-
-    private fun fetchSubscriptions() {
-        subscriptionsModel.subscriptions.value?.let {
-            channels = it
-            showChannels(it, null)
-            return
-        }
-        lifecycleScope.launch(Dispatchers.IO) {
-            channels = runCatching {
-                SubscriptionHelper.getSubscriptions()
-            }.getOrNull().orEmpty()
-            withContext(Dispatchers.Main) {
-                showChannels(channels, null)
-            }
-        }
     }
 
     private fun showChannels(channels: List<Subscription>, query: String?) {

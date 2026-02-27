@@ -3,6 +3,8 @@ package com.avinashpatil.app.youtube.services
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.getSystemService
@@ -10,12 +12,14 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.avinashpatil.app.youtube.YouTubeApp.Companion.PLAYLIST_DOWNLOAD_ENQUEUE_CHANNEL_NAME
 import com.avinashpatil.app.youtube.R
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
-import com.avinashpatil.app.youtube.api.StreamsExtractor
 import com.avinashpatil.app.youtube.api.obj.PipedStream
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.constants.IntentData
+import com.avinashpatil.app.youtube.db.DatabaseHolder
+import com.avinashpatil.app.youtube.db.obj.DownloadPlaylist
+import com.avinashpatil.app.youtube.db.obj.DownloadPlaylistVideosCrossRef
 import com.avinashpatil.app.youtube.enums.NotificationId
 import com.avinashpatil.app.youtube.enums.PlaylistType
 import com.avinashpatil.app.youtube.extensions.getWhileDigit
@@ -23,9 +27,13 @@ import com.avinashpatil.app.youtube.extensions.serializableExtra
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.helpers.DownloadHelper
+import com.avinashpatil.app.youtube.helpers.ImageHelper
 import com.avinashpatil.app.youtube.parcelable.DownloadData
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.nio.file.Path
+import kotlin.io.path.div
 
 class PlaylistDownloadEnqueueService : LifecycleService() {
     private lateinit var nManager: NotificationManager
@@ -43,7 +51,16 @@ class PlaylistDownloadEnqueueService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
 
-        startForeground(NotificationId.ENQUEUE_PLAYLIST_DOWNLOAD.id, buildNotification())
+        ServiceCompat.startForeground(
+            this,
+            NotificationId.ENQUEUE_PLAYLIST_DOWNLOAD.id,
+            buildNotification(),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            }
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -90,20 +107,38 @@ class PlaylistDownloadEnqueueService : LifecycleService() {
             return
         }
         amountOfVideos = playlist.videos
-        enqueueStreams(playlist.relatedStreams)
+        enqueueStreams(playlistId, playlist.relatedStreams)
     }
 
     private suspend fun enqueuePublicPlaylist() {
         val playlist = try {
-            RetrofitInstance.api.getPlaylist(playlistId)
+            MediaServiceRepository.instance.getPlaylist(playlistId)
         } catch (e: Exception) {
             toastFromMainDispatcher(e.localizedMessage.orEmpty())
             stopSelf()
             return
         }
 
+        val thumbnailPath = getDownloadPath(DownloadHelper.PLAYLIST_THUMBNAIL_DIR, playlistId)
+        CoroutineScope(Dispatchers.IO).launch {
+            playlist.thumbnailUrl?.let { url ->
+                ImageHelper.downloadImage(
+                    this@PlaylistDownloadEnqueueService, url, thumbnailPath
+                )
+            }
+        }
+
+        DatabaseHolder.Database.downloadDao().insertPlaylist(
+            DownloadPlaylist(
+                playlistId = playlistId,
+                title = playlist.name.orEmpty(),
+                description = playlist.description,
+                thumbnailPath = thumbnailPath,
+            )
+        )
+
         amountOfVideos = playlist.videos
-        enqueueStreams(playlist.relatedStreams)
+        enqueueStreams(playlistId, playlist.relatedStreams)
 
         var nextPage = playlist.nextpage
         // retry each api call once when fetching next pages to increase success chances
@@ -111,7 +146,7 @@ class PlaylistDownloadEnqueueService : LifecycleService() {
 
         while (nextPage != null) {
             val playlistPage = runCatching {
-                RetrofitInstance.api.getPlaylistNextPage(playlistId, nextPage!!)
+                MediaServiceRepository.instance.getPlaylistNextPage(playlistId, nextPage!!)
             }.getOrNull()
 
             if (playlistPage == null && alreadyRetriedOnce) {
@@ -127,37 +162,50 @@ class PlaylistDownloadEnqueueService : LifecycleService() {
             }
 
             alreadyRetriedOnce = false
-            enqueueStreams(playlistPage.relatedStreams)
+            enqueueStreams(playlistId, playlistPage.relatedStreams)
             nextPage = playlistPage.nextpage
         }
     }
 
-    private suspend fun enqueueStreams(streams: List<StreamItem>) {
+    private suspend fun enqueueStreams(playlistId: String, streams: List<StreamItem>) {
         nManager.notify(NotificationId.ENQUEUE_PLAYLIST_DOWNLOAD.id, buildNotification())
 
         for (stream in streams) {
-            val videoInfo = runCatching {
-                StreamsExtractor.extractStreams(stream.url!!.toID())
-            }.getOrNull() ?: continue
+            val videoId = stream.url!!.toID()
 
-            val videoStream = getStream(videoInfo.videoStreams, maxVideoQuality)
-            val audioStream = getStream(videoInfo.audioStreams, maxAudioQuality)
-
-            val downloadData = DownloadData(
-                videoId = stream.url!!.toID(),
-                fileName = videoInfo.title,
-                videoFormat = videoStream?.format,
-                videoQuality = videoStream?.quality,
-                audioFormat = audioStream?.format,
-                audioQuality = audioStream?.quality,
-                audioLanguage = audioLanguage.takeIf {
-                    videoInfo.audioStreams.any { it.audioTrackLocale == audioLanguage }
-                },
-                subtitleCode = captionLanguage.takeIf {
-                    videoInfo.subtitles.any { it.code == captionLanguage }
-                }
+            // link the playlist to the video, so that we can later query all videos contained in the playlist
+            DatabaseHolder.Database.downloadDao().insertPlaylistVideoConnection(
+                DownloadPlaylistVideosCrossRef(
+                    videoId = videoId,
+                    playlistId = playlistId
+                )
             )
-            DownloadHelper.startDownloadService(this, downloadData)
+
+            // only download videos that have not been downloaded before
+            if (!DatabaseHolder.Database.downloadDao().exists(videoId)) {
+                val videoInfo = runCatching {
+                    MediaServiceRepository.instance.getStreams(videoId)
+                }.getOrNull() ?: continue
+
+                val videoStream = getStream(videoInfo.videoStreams, maxVideoQuality)
+                val audioStream = getStream(videoInfo.audioStreams, maxAudioQuality)
+
+                val downloadData = DownloadData(
+                    videoId = videoId,
+                    videoFormat = videoStream?.format,
+                    videoQuality = videoStream?.quality,
+                    audioFormat = audioStream?.format,
+                    audioQuality = audioStream?.quality,
+                    audioLanguage = audioLanguage.takeIf {
+                        videoInfo.audioStreams.any { it.audioTrackLocale == audioLanguage }
+                    },
+                    subtitleCode = captionLanguage.takeIf {
+                        videoInfo.subtitles.any { it.code == captionLanguage }
+                    }
+                )
+                DownloadHelper.startDownloadService(this, downloadData)
+            }
+            // TODO: inform the user if an already downloaded video has been skipped
 
             amountOfVideosDone++
             nManager.notify(NotificationId.ENQUEUE_PLAYLIST_DOWNLOAD.id, buildNotification())
@@ -178,6 +226,11 @@ class PlaylistDownloadEnqueueService : LifecycleService() {
         return sortedStreams
             .lastOrNull { it.quality.getWhileDigit()!! <= maxStreamQuality }
             ?: sortedStreams.firstOrNull()
+    }
+
+    @Suppress("SameParameterValue")
+    private fun getDownloadPath(directory: String, fileName: String): Path {
+        return DownloadHelper.getDownloadDir(this, directory) / fileName
     }
 
     override fun onDestroy() {

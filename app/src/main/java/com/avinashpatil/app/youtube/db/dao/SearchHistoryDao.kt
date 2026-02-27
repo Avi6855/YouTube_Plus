@@ -6,11 +6,18 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.avinashpatil.app.youtube.db.obj.SearchHistoryItem
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SearchHistoryDao {
-    @Query("SELECT * FROM searchHistoryItem")
+    @Query("SELECT * FROM searchHistoryItem ORDER BY rowid ASC")
     suspend fun getAll(): List<SearchHistoryItem>
+
+    @Query("SELECT * FROM searchHistoryItem ORDER BY rowid ASC")
+    fun getAllFlow(): Flow<List<SearchHistoryItem>>
+
+    @Query("SELECT * FROM searchHistoryItem ORDER BY rowid DESC")
+    fun getAllNewestFirstFlow(): Flow<List<SearchHistoryItem>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(searchHistoryItem: SearchHistoryItem)

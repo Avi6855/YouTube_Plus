@@ -49,7 +49,7 @@ class DescriptionLayout(
     fun setSegments(segments: List<Segment>) {
         if (PlayerHelper.getSponsorBlockCategories()[SB_SPONSOR_CATEGORY] == SbSkipOptions.OFF) {
             // only show the badge if the user requested to show sponsors
-            return
+           return
         }
 
         val segment = segments.filter { it.actionType == Segment.TYPE_FULL }.firstNotNullOfOrNull {
@@ -100,8 +100,8 @@ class DescriptionLayout(
             }.orEmpty()
             additionalVideoInfo.text =
                 "${context?.getString(R.string.category)}: ${streams.category}\n" +
-                        "${context?.getString(R.string.license)}: ${streams.license}\n" +
-                        "${context?.getString(R.string.visibility)}: $visibility"
+                "${context?.getString(R.string.license)}: ${streams.license}\n" +
+                "${context?.getString(R.string.visibility)}: $visibility"
 
             if (streams.tags.isNotEmpty()) {
                 videoTagsAdapter.submitList(streams.tags)
@@ -109,6 +109,16 @@ class DescriptionLayout(
             binding.tagsRecycler.isVisible = streams.tags.isNotEmpty()
 
             setupDescription(streams.description)
+        }
+    }
+
+    /**
+     * Collapses the description, if it is currently expanded.
+     */
+    fun collapseDescription() {
+        val isCollapsed = binding.descLinLayout.isGone
+        if (!isCollapsed) {
+            toggleDescription()
         }
     }
 

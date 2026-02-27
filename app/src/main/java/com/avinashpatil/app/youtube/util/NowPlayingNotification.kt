@@ -9,23 +9,18 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
-import com.avinashpatil.app.youtube.YouTubeApp.Companion.PLAYER_CHANNEL_NAME
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.constants.IntentData
+import com.avinashpatil.app.youtube.YouTubeApp.Companion.PLAYER_CHANNEL_NAME
 import com.avinashpatil.app.youtube.enums.NotificationId
 import com.avinashpatil.app.youtube.enums.PlayerEvent
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
-import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.google.common.collect.ImmutableList
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class NowPlayingNotification(
     private val context: Context,
-    private val backgroundOnly: Boolean = false,
-    private val offlinePlayer: Boolean = false
+    var notificationIntent: Intent = Intent(),
 ): MediaNotification.Provider {
-    var intentActivity: Class<*> = MainActivity::class.java
-
     private val nProvider = DefaultMediaNotificationProvider.Builder(context)
         .setNotificationId(NotificationId.PLAYER_PLAYBACK.id)
         .setChannelId(PLAYER_CHANNEL_NAME)
@@ -37,16 +32,10 @@ class NowPlayingNotification(
         // it doesn't start a completely new MainActivity because the MainActivity's launchMode
         // is set to "singleTop" in the AndroidManifest (important!!!)
         // that's the only way to launch back into the previous activity (e.g. the player view)
-        val intent = Intent(context, intentActivity).apply {
-            if (backgroundOnly) {
-                putExtra(IntentData.openAudioPlayer, true)
-                putExtra(IntentData.offlinePlayer, offlinePlayer)
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-        }
+
 
         return PendingIntentCompat
-            .getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT, false)
+            .getActivity(context, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT, false)
     }
 
     /**

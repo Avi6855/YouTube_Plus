@@ -2,13 +2,18 @@ package com.avinashpatil.app.youtube.ui.base
 
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.helpers.LocaleHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.helpers.ThemeHelper
+import com.avinashpatil.app.youtube.helpers.ThemeHelper.getThemeMode
 import com.avinashpatil.app.youtube.helpers.WindowHelper
 import java.util.Locale
 
@@ -41,6 +46,7 @@ open class BaseActivity : AppCompatActivity() {
         ThemeHelper.updateTheme(this)
         if (isDialogActivity) ThemeHelper.applyDialogActivityTheme(this)
 
+        // enable auto-rotation if enabled
         requestOrientationChange()
 
         // wait for the window decor view to be drawn before detecting display cutouts
@@ -48,26 +54,28 @@ open class BaseActivity : AppCompatActivity() {
             hasCutout = WindowHelper.hasCutout(view)
             window.decorView.onApplyWindowInsets(insets)
         }
+        enableEdgeToEdge()
 
         super.onCreate(savedInstanceState)
     }
 
     override fun attachBaseContext(newBase: Context?) {
-        if (newBase == null) {
-            super.attachBaseContext(null)
-            return
+        super.attachBaseContext(newBase)
+
+        val configuration = Configuration().apply {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                // TODO: remove this case in the future
+                @Suppress("DEPRECATION")
+                val locale = LocaleHelper.getAppLocale()
+                Locale.setDefault(locale)
+                setLocale(locale)
+            }
+
+            val uiPref = PreferenceHelper.getString(PreferenceKeys.THEME_MODE, "A")
+            AppCompatDelegate.setDefaultNightMode(getThemeMode(uiPref))
         }
 
-        // change the locale according to the user's preference (or system language as fallback)
-        val locale = LocaleHelper.getAppLocale()
-        Locale.setDefault(locale)
-
-        val configuration = newBase.resources.configuration.apply {
-            setLocale(locale)
-        }
-        val newContext = newBase.createConfigurationContext(configuration)
-
-        super.attachBaseContext(newContext)
+        applyOverrideConfiguration(configuration)
     }
 
     /**

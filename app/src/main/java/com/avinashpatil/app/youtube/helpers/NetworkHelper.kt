@@ -1,5 +1,6 @@
 package com.avinashpatil.app.youtube.helpers
 
+
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -16,7 +17,7 @@ object NetworkHelper {
         val activeNetwork = connectivityManager.activeNetwork
         val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     }
 
     /**

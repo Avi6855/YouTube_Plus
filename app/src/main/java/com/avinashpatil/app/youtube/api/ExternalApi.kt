@@ -1,24 +1,38 @@
 package com.avinashpatil.app.youtube.api
 
 import com.avinashpatil.app.youtube.api.obj.DeArrowBody
+import com.avinashpatil.app.youtube.api.obj.DeArrowContent
+import com.avinashpatil.app.youtube.api.obj.PipedConfig
 import com.avinashpatil.app.youtube.api.obj.PipedInstance
+import com.avinashpatil.app.youtube.api.obj.SegmentData
 import com.avinashpatil.app.youtube.api.obj.SubmitSegmentResponse
 import com.avinashpatil.app.youtube.api.obj.VoteInfo
 import com.avinashpatil.app.youtube.obj.update.UpdateInfo
+import kotlinx.serialization.json.JsonElement
+import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Headers
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Url
 
-private const val GITHUB_API_URL = "https://api.github.com/repos/libre-tube/LibreTube/releases/latest"
+private const val GITHUB_API_URL = "https://github.com/Avi6855"
 private const val SB_API_URL = "https://sponsor.ajay.app"
-private const val RYD_API_URL = "https://returnyoutubedislikeapi.com"
+private const val RYD_API_URL = "https://ryd-proxy.kavin.rocks"
+private const val GOOGLE_API_KEY = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw"
+const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.3"
+private const val PIPED_INSTANCES_URL = "https://piped-instances.kavin.rocks"
 
 interface ExternalApi {
     // only for fetching servers list
     @GET
-    suspend fun getInstances(@Url url: String): List<PipedInstance>
+    suspend fun getInstances(@Url url: String = PIPED_INSTANCES_URL): List<PipedInstance>
+
+    @GET("config")
+    suspend fun getInstanceConfig(@Url url: String): PipedConfig
 
     // fetch latest version info
     @GET(GITHUB_API_URL)
@@ -39,6 +53,13 @@ interface ExternalApi {
         @Query("description") description: String = ""
     ): List<SubmitSegmentResponse>
 
+    @GET("$SB_API_URL/api/skipSegments/{videoId}")
+    suspend fun getSegments(
+        @Path("videoId") videoId: String,
+        @Query("category") category: List<String>,
+        @Query("actionType") actionType: List<String>? = null
+    ): List<SegmentData>
+
     @POST("$SB_API_URL/api/branding")
     suspend fun submitDeArrow(@Body body: DeArrowBody)
 
@@ -51,4 +72,20 @@ interface ExternalApi {
         @Query("userID") userID: String,
         @Query("type") score: Int
     )
+
+    @GET("$SB_API_URL/api/branding/{videoId}")
+    suspend fun getDeArrowContent(@Path("videoId") videoId: String): Map<String, DeArrowContent>
+
+    @Headers(
+        "User-Agent: $USER_AGENT",
+        "Accept: application/json",
+        "Content-Type: application/json+protobuf",
+        "x-goog-api-key: $GOOGLE_API_KEY",
+        "x-user-agent: grpc-web-javascript/0.1",
+    )
+    @POST
+    suspend fun botguardRequest(
+        @Url url: String,
+        @Body jsonPayload: List<String>
+    ): JsonElement
 }

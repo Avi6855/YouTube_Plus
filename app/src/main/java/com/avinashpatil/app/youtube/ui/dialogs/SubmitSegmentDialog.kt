@@ -9,7 +9,7 @@ import androidx.core.view.isGone
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.JsonHelper
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.api.obj.Segment
 import com.avinashpatil.app.youtube.constants.IntentData
@@ -23,7 +23,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 
 class SubmitSegmentDialog : DialogFragment() {
     private var videoId: String = ""
@@ -146,7 +145,7 @@ class SubmitSegmentDialog : DialogFragment() {
     private suspend fun fetchSegments() {
         val categories = resources.getStringArray(R.array.sponsorBlockSegments).toList()
         segments = try {
-            RetrofitInstance.api.getSegments(videoId, JsonHelper.json.encodeToString(categories)).segments
+            MediaServiceRepository.instance.getSegments(videoId, categories).segments
         } catch (e: Exception) {
             Log.e(TAG(), e.toString())
             return

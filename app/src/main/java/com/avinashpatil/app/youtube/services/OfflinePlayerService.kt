@@ -3,9 +3,17 @@ package com.avinashpatil.app.youtube.services
 import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaItem.SubtitleConfiguration
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.FileDataSource
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.db.DatabaseHelper
 import com.avinashpatil.app.youtube.db.DatabaseHolder.Database
@@ -15,10 +23,14 @@ import com.avinashpatil.app.youtube.enums.FileType
 import com.avinashpatil.app.youtube.extensions.serializable
 import com.avinashpatil.app.youtube.extensions.setMetadata
 import com.avinashpatil.app.youtube.extensions.toAndroidUri
+import com.avinashpatil.app.youtube.extensions.updateParameters
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.avinashpatil.app.youtube.ui.activities.NoInternetActivity
+import com.avinashpatil.app.youtube.ui.activities.OfflinePlayerActivity
+import com.avinashpatil.app.youtube.ui.fragments.DownloadSortingOrder
 import com.avinashpatil.app.youtube.ui.fragments.DownloadTab
+import com.avinashpatil.app.youtube.ui.fragments.DownloadsFragmentPage.Companion.sortDownloadList
 import com.avinashpatil.app.youtube.util.PlayingQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,24 +45,27 @@ import kotlin.io.path.exists
 @OptIn(UnstableApi::class)
 open class OfflinePlayerService : AbstractPlayerService() {
     override val isOfflinePlayer: Boolean = true
-    override val isAudioOnlyPlayer: Boolean = true
     private var noInternetService: Boolean = false
 
     private var downloadWithItems: DownloadWithItems? = null
     private lateinit var downloadTab: DownloadTab
     private var shuffle: Boolean = false
+    private var playlistId: String? = null
+    private var downloadSortOrder: DownloadSortingOrder? = null
 
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED && PlayerHelper.isAutoPlayEnabled()) {
-                playNextVideo(PlayingQueue.getNext() ?: return)
+            if (playbackState == Player.STATE_ENDED) {
+                playNextVideo()
             }
 
-            if (playbackState == Player.STATE_READY) {
+            // add video to watch history when playback starts
+            if (playbackState == Player.STATE_READY && PlayerHelper.watchHistoryEnabled) {
                 scope.launch(Dispatchers.IO) {
-                    val watchHistoryItem = downloadWithItems?.download?.toStreamItem()?.toWatchHistoryItem(videoId)
+                    val watchHistoryItem =
+                        downloadWithItems?.download?.toStreamItem()?.toWatchHistoryItem(videoId)
                     if (watchHistoryItem != null) {
                         DatabaseHelper.addToWatchHistory(watchHistoryItem)
                     }
@@ -65,25 +80,40 @@ open class OfflinePlayerService : AbstractPlayerService() {
         downloadTab = args.serializable(IntentData.downloadTab)!!
         shuffle = args.getBoolean(IntentData.shuffle, false)
         noInternetService = args.getBoolean(IntentData.noInternet, false)
-
-        val videoId = if (shuffle) {
-            runBlocking(Dispatchers.IO) {
-                Database.downloadDao().getRandomVideoIdByFileType(FileType.AUDIO)
-            }
-        } else {
-            args.getString(IntentData.videoId)
-        } ?: return
-        setVideoId(videoId)
+        isAudioOnlyPlayer = args.getBoolean(IntentData.audioOnly, false)
+        playlistId = args.getString(IntentData.playlistId)
+        downloadSortOrder = args.serializable(IntentData.sortOptions)
 
         PlayingQueue.clear()
 
+        this.videoId = if (shuffle) {
+            runBlocking(Dispatchers.IO) {
+                if (downloadTab == DownloadTab.PLAYLIST) {
+                    Database.downloadDao()
+                        .getDownloadPlaylistById(playlistId!!).downloadVideos.randomOrNull()
+                } else {
+                    Database.downloadDao().getAll().filterByTab(downloadTab)
+                        .randomOrNull()?.download
+                }
+            }?.videoId
+        } else {
+            args.getString(IntentData.videoId)
+        } ?: return
+
         exoPlayer?.addListener(playerListener)
+        trackSelector?.updateParameters {
+            setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, isAudioOnlyPlayer)
+        }
 
         fillQueue()
     }
 
     override fun getIntentActivity(): Class<*> {
-        return if (noInternetService) NoInternetActivity::class.java else MainActivity::class.java
+        return when {
+            !noInternetService && isAudioOnlyPlayer -> MainActivity::class.java
+            noInternetService && isAudioOnlyPlayer -> NoInternetActivity::class.java
+            else -> OfflinePlayerActivity::class.java
+        }
     }
 
     /**
@@ -94,7 +124,7 @@ open class OfflinePlayerService : AbstractPlayerService() {
 
         val downloadWithItems = withContext(Dispatchers.IO) {
             Database.downloadDao().findById(videoId)
-        }!!
+        } ?: return
         this.downloadWithItems = downloadWithItems
 
         PlayingQueue.updateCurrent(downloadWithItems.download.toStreamItem())
@@ -116,42 +146,93 @@ open class OfflinePlayerService : AbstractPlayerService() {
         }
     }
 
-    open fun setMediaItem(downloadWithItems: DownloadWithItems) {
-        val audioItem = downloadWithItems.downloadItems.filter { it.path.exists() }
-            .firstOrNull { it.type == FileType.AUDIO }
-            ?: // in some rare cases, video files can contain audio
-            downloadWithItems.downloadItems.firstOrNull { it.type == FileType.VIDEO }
+    private fun setMediaItem(downloadWithItems: DownloadWithItems) {
+        val downloadFiles = downloadWithItems.downloadItems.filter { it.path.exists() }
 
-        if (audioItem == null) {
+        val videoUri = downloadFiles.firstOrNull { it.type == FileType.VIDEO }?.path?.toAndroidUri()
+        val audioUri = downloadFiles.firstOrNull { it.type == FileType.AUDIO }?.path?.toAndroidUri()
+        val subtitleInfo = downloadFiles.firstOrNull { it.type == FileType.SUBTITLE }
+
+        val videoSource = videoUri?.let { videoUri ->
+            val videoItem = MediaItem.Builder()
+                .setUri(videoUri)
+                .setMetadata(downloadWithItems)
+                .build()
+
+            ProgressiveMediaSource.Factory(FileDataSource.Factory())
+                .createMediaSource(videoItem)
+        }
+
+        val audioSource = audioUri?.let { audioUri ->
+            val audioItem = MediaItem.Builder()
+                .setUri(audioUri)
+                .setMetadata(downloadWithItems)
+                .build()
+
+            ProgressiveMediaSource.Factory(FileDataSource.Factory())
+                .createMediaSource(audioItem)
+        }
+
+        val subtitleSource = subtitleInfo?.let { subtitleInfo ->
+            val subtitle = SubtitleConfiguration.Builder(subtitleInfo.path.toAndroidUri())
+                .setMimeType(MimeTypes.APPLICATION_TTML)
+                .setLanguage(subtitleInfo.language ?: "en")
+                .build()
+
+            SingleSampleMediaSource.Factory(FileDataSource.Factory())
+                .createMediaSource(subtitle, C.TIME_UNSET)
+        }
+
+        var mediaSource: MediaSource? = null
+        listOfNotNull(videoSource, audioSource, subtitleSource).forEach { source ->
+            mediaSource =
+                if (mediaSource == null) source else MergingMediaSource(mediaSource!!, source)
+        }
+
+        if (mediaSource == null || isAudioOnlyPlayer && audioSource == null) {
             stopSelf()
             return
         }
 
-        val mediaItem = MediaItem.Builder()
-            .setUri(audioItem.path.toAndroidUri())
-            .setMetadata(downloadWithItems)
-            .build()
+        exoPlayer?.setMediaSource(mediaSource!!)
 
-        exoPlayer?.setMediaItem(mediaItem)
+        trackSelector?.updateParameters {
+            setPreferredTextRoleFlags(C.ROLE_FLAG_CAPTION)
+            setPreferredTextLanguage(subtitleInfo?.language ?: "en")
+        }
     }
 
     private suspend fun fillQueue() {
-        val downloads = withContext(Dispatchers.IO) {
-            Database.downloadDao().getAll()
+        if (downloadTab == DownloadTab.PLAYLIST) {
+            var videos = withContext(Dispatchers.IO) {
+                Database.downloadDao().getDownloadPlaylistById(playlistId!!)
+            }.downloadVideos
+
+            if (shuffle) videos = listOf(videos.first { it.videoId == videoId }) +
+                    videos.filter { it.videoId != videoId }.shuffled()
+            else if (downloadSortOrder != null) videos =
+                sortDownloadList(videos, downloadSortOrder!!)
+            PlayingQueue.setStreams(videos.map { it.toStreamItem() })
+        } else {
+            var downloads = withContext(Dispatchers.IO) {
+                Database.downloadDao().getAll()
+            }
+                .filterByTab(downloadTab)
+                .map { it.download }
+
+            if (shuffle) downloads = downloads.shuffled()
+            else if (downloadSortOrder != null) downloads = sortDownloadList(downloads, downloadSortOrder!!)
+
+            PlayingQueue.add(*downloads.map { it.toStreamItem() }.toTypedArray())
         }
-            .filterByTab(downloadTab)
-            .toMutableList()
-
-        if (shuffle) downloads.shuffle()
-
-        PlayingQueue.insertRelatedStreams(downloads.map { it.download.toStreamItem() })
     }
 
-    private fun playNextVideo(videoId: String) {
-        setVideoId(videoId)
-
-        scope.launch {
-            startPlayback()
+    private fun playNextVideo(videoId: String? = null) {
+        if (PlayingQueue.repeatMode == Player.REPEAT_MODE_ONE) {
+            exoPlayer?.seekTo(0)
+        } else if (PlayerHelper.isAutoPlayEnabled()) {
+            val nextId = videoId ?: PlayingQueue.getNext() ?: return
+            navigateVideo(nextId)
         }
     }
 

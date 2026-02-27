@@ -38,21 +38,34 @@ class DropdownMenu(
         get() = adapter.getPosition(binding.autoCompleteTextView.text.toString())
         set(index) = binding.autoCompleteTextView.setText(adapter.getItem(index), false)
 
-    val text get() = binding.autoCompleteTextView.text.toString()
-
-    override fun setEnabled(enabled: Boolean) {
-        binding.textInputLayout.isEnabled = enabled
-    }
-
-    override fun isEnabled(): Boolean {
-        return binding.textInputLayout.isEnabled
-    }
+    val selectedItem get() = binding.autoCompleteTextView.text.toString()
 
     var typingEnabled: Boolean
         set(enabled) {
             binding.autoCompleteTextView.inputType = if (enabled) InputType.TYPE_CLASS_TEXT else InputType.TYPE_NULL
         }
         get() = binding.autoCompleteTextView.inputType != InputType.TYPE_NULL
+
+    override fun setEnabled(enabled: Boolean) {
+        binding.textInputLayout.isEnabled = enabled
+    }
+
+    override fun isEnabled() = binding.textInputLayout.isEnabled
+
+    private var onSelectionChangeListener: ((Int) -> Unit)? = null
+
+    fun setOnSelectionChangeListener(listener: ((Int) -> Unit)?) {
+        onSelectionChangeListener = listener
+    }
+
+    fun setSelection(item: String) {
+        val itemIndex = items.indexOf(item)
+        if (itemIndex != -1) selectedItemPosition = itemIndex
+    }
+
+    fun getSelectionIfNotFirst(): String? {
+        return selectedItem.takeIf { selectedItemPosition != 0 }
+    }
 
     init {
         context.obtainStyledAttributes(attributeSet, R.styleable.DropdownMenu, 0, 0).use {
@@ -62,5 +75,9 @@ class DropdownMenu(
         }
 
         adapter = ArrayAdapter(context, R.layout.dropdown_item)
+
+        binding.autoCompleteTextView.setOnItemClickListener {_, _, position, _ ->
+            onSelectionChangeListener?.invoke(position)
+        }
     }
 }

@@ -13,7 +13,7 @@ import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import androidx.lifecycle.lifecycleScope
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.StreamsExtractor
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.obj.PipedStream
 import com.avinashpatil.app.youtube.api.obj.Streams
 import com.avinashpatil.app.youtube.api.obj.Subtitle
@@ -21,11 +21,12 @@ import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.DialogDownloadBinding
 import com.avinashpatil.app.youtube.extensions.TAG
 import com.avinashpatil.app.youtube.extensions.getWhileDigit
+import com.avinashpatil.app.youtube.extensions.sha256Sum
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.helpers.DownloadHelper
+import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.parcelable.DownloadData
-import com.avinashpatil.app.youtube.util.TextUtils
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,29 +46,11 @@ class DownloadDialog : DialogFragment() {
 
         fetchAvailableSources(binding)
 
-        binding.fileName.filters += InputFilter { source, start, end, _, _, _ ->
-            if (source.isNullOrBlank()) {
-                return@InputFilter null
-            }
-
-            // Extract actual source
-            val actualSource = source.subSequence(start, end)
-            // Filter out unsupported characters
-            val filtered = actualSource.filterNot {
-                TextUtils.RESERVED_CHARS.contains(it, true)
-            }
-            // Check if something was filtered out
-            return@InputFilter if (actualSource.length != filtered.length) {
-                filtered
-            } else {
-                null
-            }
-        }
-
         return MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.download)
             .setView(binding.root)
             .setPositiveButton(R.string.download, null)
+            .setNegativeButton(R.string.cancel, null)
             .show()
             .apply {
                 getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
@@ -80,13 +63,11 @@ class DownloadDialog : DialogFragment() {
         lifecycleScope.launch {
             val response = try {
                 withContext(Dispatchers.IO) {
-                    StreamsExtractor.extractStreams(videoId)
+                    MediaServiceRepository.instance.getStreams(videoId)
                 }
-            } catch (e: Exception) {
+            }  catch (e: Exception) {
                 Log.e(TAG(), e.stackTraceToString())
-                val context = context ?: return@launch
-                val errorMessage = StreamsExtractor.getExtractorErrorMessageString(context, e)
-                context.toastFromMainDispatcher(errorMessage)
+                context?.toastFromMainDispatcher(e.localizedMessage.orEmpty())
                 return@launch
             }
             initDownloadOptions(binding, response)
@@ -94,7 +75,7 @@ class DownloadDialog : DialogFragment() {
     }
 
     private fun initDownloadOptions(binding: DialogDownloadBinding, streams: Streams) {
-        binding.fileName.setText(streams.title)
+        binding.videoTitle.text = streams.title
 
         val videoStreams = streams.videoStreams.filter {
             !it.url.isNullOrEmpty()
@@ -104,9 +85,14 @@ class DownloadDialog : DialogFragment() {
 
         val audioStreams = streams.audioStreams.filter {
             !it.url.isNullOrEmpty()
-        }.sortedByDescending {
-            it.quality.getWhileDigit()
         }
+            .sortedBy {
+                // prioritize main audio track types (lower role flag) over secondary/subbed ones
+                PlayerHelper.getFullAudioRoleFlags(0, it.audioTrackType.orEmpty())
+            }
+            .sortedByDescending {
+                it.quality.getWhileDigit()
+            }
 
         val subtitles = streams.subtitles
             .filter { !it.url.isNullOrEmpty() && !it.name.isNullOrEmpty() }
@@ -139,17 +125,6 @@ class DownloadDialog : DialogFragment() {
         restorePreviousSelections(binding, videoStreams, audioStreams, subtitles)
 
         onDownloadConfirm = onDownloadConfirm@{
-            val fileName = binding.fileName.text.toString()
-            if (fileName.isBlank()) {
-                Toast.makeText(context, R.string.invalid_filename, Toast.LENGTH_SHORT).show()
-                return@onDownloadConfirm
-            }
-
-            if (fileName.toByteArray().size > MAX_FILE_NAME_BYTES - 32) { // reserve 32 bytes for quality and extension
-                Toast.makeText(context, R.string.filename_too_long, Toast.LENGTH_SHORT).show()
-                return@onDownloadConfirm
-            }
-
             val videoPosition = binding.videoSpinner.selectedItemPosition - 1
             val audioPosition = binding.audioSpinner.selectedItemPosition - 1
             val subtitlePosition = binding.subtitleSpinner.selectedItemPosition - 1
@@ -167,7 +142,6 @@ class DownloadDialog : DialogFragment() {
 
             val downloadData = DownloadData(
                 videoId = videoId,
-                fileName = binding.fileName.text?.toString().orEmpty(),
                 videoFormat = videoStream?.format,
                 videoQuality = videoStream?.quality,
                 audioFormat = audioStream?.format,
@@ -258,11 +232,6 @@ class DownloadDialog : DialogFragment() {
     }
 
     companion object {
-        /**
-         * Max file name length at Android systems
-         */
-        private const val MAX_FILE_NAME_BYTES = 255
-
         private const val VIDEO_DOWNLOAD_QUALITY = "video_download_quality"
         private const val VIDEO_DOWNLOAD_FORMAT = "video_download_format"
         private const val AUDIO_DOWNLOAD_QUALITY = "audio_download_quality"

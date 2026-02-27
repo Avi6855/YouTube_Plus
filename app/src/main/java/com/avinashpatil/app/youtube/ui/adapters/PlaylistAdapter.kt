@@ -9,7 +9,6 @@ import android.view.ViewGroup
 import androidx.core.os.bundleOf
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
-import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.RecyclerView
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
@@ -19,7 +18,6 @@ import com.avinashpatil.app.youtube.databinding.VideoRowBinding
 import com.avinashpatil.app.youtube.db.DatabaseHolder
 import com.avinashpatil.app.youtube.enums.PlaylistType
 import com.avinashpatil.app.youtube.extensions.TAG
-import com.avinashpatil.app.youtube.extensions.dpToPx
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.helpers.ImageHelper
@@ -45,7 +43,8 @@ class PlaylistAdapter(
     val originalFeed: MutableList<StreamItem>,
     private val sortedFeed: MutableList<StreamItem>,
     private val playlistId: String,
-    private val playlistType: PlaylistType
+    private val playlistType: PlaylistType,
+    private val onVideoClick: (StreamItem) -> Unit
 ) : RecyclerView.Adapter<PlaylistViewHolder>() {
 
     private var visibleCount = minOf(20, sortedFeed.size)
@@ -82,17 +81,18 @@ class PlaylistAdapter(
 
         holder.binding.apply {
             videoTitle.text = streamItem.title
-            videoInfo.text = TextUtils.formatViewsString(root.context, streamItem.views ?: -1, streamItem.uploaded, streamItem.uploaderName)
+            videoInfo.text = TextUtils.formatViewsString(root.context, streamItem.views ?: -1, streamItem.uploaded)
             videoInfo.maxLines = 2
 
             // piped does not load channel avatars for playlist views
-            channelContainer.isGone = true
+            channelImageContainer.isGone = true
+            channelName.text = streamItem.uploaderName
 
             ImageHelper.loadImage(streamItem.thumbnail, thumbnail)
             thumbnailDuration.setFormattedDuration(streamItem.duration ?: -1, streamItem.isShort, streamItem.uploaded)
 
             root.setOnClickListener {
-                NavigationHelper.navigateVideo(root.context, streamItem.url, playlistId)
+                onVideoClick(streamItem)
             }
 
             val activity = (root.context as BaseActivity)
@@ -104,19 +104,20 @@ class PlaylistAdapter(
                 ) { _, _ ->
                     notifyItemChanged(position)
                 }
-                val sheet = VideoOptionsBottomSheet()
-                sheet.arguments = bundleOf(IntentData.streamItem to streamItem)
-                sheet.show(fragmentManager, VideoOptionsBottomSheet::class.java.name)
+                VideoOptionsBottomSheet().apply {
+                    arguments = bundleOf(
+                        IntentData.streamItem to streamItem,
+                        IntentData.playlistId to playlistId
+                    )
+                }
+                    .show(fragmentManager, VideoOptionsBottomSheet::class.java.name)
                 true
             }
 
             if (!streamItem.uploaderUrl.isNullOrBlank()) {
-                videoInfo.setOnClickListener {
+                channelContainer.setOnClickListener {
                     NavigationHelper.navigateChannel(root.context, streamItem.uploaderUrl)
                 }
-                // add some extra padding to make it easier to click
-                val extraPadding = 3f.dpToPx()
-                videoInfo.updatePadding(top = extraPadding, bottom = extraPadding)
             }
 
             streamItem.duration?.let { watchProgress.setWatchProgressLength(videoId, it) }

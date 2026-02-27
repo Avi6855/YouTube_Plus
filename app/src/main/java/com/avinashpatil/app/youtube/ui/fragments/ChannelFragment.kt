@@ -13,34 +13,28 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.RetrofitInstance
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.obj.ChannelTab
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.FragmentChannelBinding
-import com.avinashpatil.app.youtube.enums.ShareObjectType
 import com.avinashpatil.app.youtube.extensions.TAG
 import com.avinashpatil.app.youtube.extensions.formatShort
-import com.avinashpatil.app.youtube.extensions.toID
+import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.helpers.ClipboardHelper
 import com.avinashpatil.app.youtube.helpers.ImageHelper
 import com.avinashpatil.app.youtube.helpers.NavigationHelper
-import com.avinashpatil.app.youtube.obj.ShareData
 import com.avinashpatil.app.youtube.ui.adapters.VideosAdapter
 import com.avinashpatil.app.youtube.ui.base.DynamicLayoutManagerFragment
 import com.avinashpatil.app.youtube.ui.dialogs.ShareDialog
-import com.avinashpatil.app.youtube.ui.extensions.setupFragmentAnimation
 import com.avinashpatil.app.youtube.ui.extensions.setupSubscriptionButton
-import com.avinashpatil.app.youtube.ui.sheets.AddChannelToGroupSheet
-import com.avinashpatil.app.youtube.util.deArrow
+import com.avinashpatil.app.youtube.ui.sheets.ChannelOptionsBottomSheet
 import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
-import java.io.IOException
 
-class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) {
+class ChannelFragment : Fragment(R.layout.fragment_channel) {
     private var _binding: FragmentChannelBinding? = null
     private val binding get() = _binding!!
     private val args by navArgs<ChannelFragmentArgs>()
@@ -72,8 +66,6 @@ class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) 
         channelId = args.channelId
     }
 
-    override fun setLayoutManagers(gridItems: Int) {}
-
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         _binding = FragmentChannelBinding.bind(view)
         super.onViewCreated(view, savedInstanceState)
@@ -94,8 +86,6 @@ class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) 
         }
 
         fetchChannel()
-
-        setupFragmentAnimation(binding.root)
     }
 
     // adjust sensitivity due to the issue of viewpager2 with SwipeToRefresh https://issuetracker.google.com/issues/138314213
@@ -122,18 +112,14 @@ class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) 
         val response = try {
             withContext(Dispatchers.IO) {
                 if (channelId != null) {
-                    RetrofitInstance.api.getChannel(channelId!!)
+                    MediaServiceRepository.instance.getChannel(channelId!!)
                 } else {
-                    RetrofitInstance.api.getChannelByName(channelName!!)
-                }.apply {
-                    relatedStreams = relatedStreams.deArrow()
+                    MediaServiceRepository.instance.getChannelByName(channelName!!)
                 }
             }
-        } catch (e: IOException) {
-            Log.e(TAG(), "IOException, you might not have internet connection")
-            return@launch
-        } catch (e: HttpException) {
-            Log.e(TAG(), "HttpException, unexpected response")
+        } catch (e: Exception) {
+            Log.e(TAG(), e.stackTraceToString())
+            context?.toastFromMainDispatcher(e.localizedMessage.orEmpty())
             return@launch
         } finally {
             _binding?.channelRefresh?.isRefreshing = false
@@ -144,40 +130,30 @@ class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) 
         // needed if the channel gets loaded by the ID
         channelId = response.id
         channelName = response.name
-        val shareData = ShareData(currentChannel = response.name)
 
         val channelId = channelId ?: return@launch
 
+        var isSubscribed = false
         binding.channelSubscribe.setupSubscriptionButton(
             channelId,
-            channelName,
+            response.name.orEmpty(),
+            response.avatarUrl,
+            response.verified,
             binding.notificationBell
-        ) { isSubscribed ->
-            _binding?.addToGroup?.isVisible = isSubscribed
+        ) {
+            isSubscribed = it
         }
 
-        binding.channelShare.setOnClickListener {
-            val bundle = bundleOf(
-                IntentData.id to channelId.toID(),
-                IntentData.shareObjectType to ShareObjectType.CHANNEL,
-                IntentData.shareData to shareData
-            )
-            val newShareDialog = ShareDialog()
-            newShareDialog.arguments = bundle
-            newShareDialog.show(childFragmentManager, ShareDialog::class.java.name)
-        }
-
-        binding.addToGroup.setOnClickListener {
-            AddChannelToGroupSheet().apply {
-                arguments = bundleOf(IntentData.channelId to channelId)
-            }.show(childFragmentManager)
-        }
-
-        binding.playAll.setOnClickListener {
-            val firstVideoId =
-                response.relatedStreams.firstOrNull()?.url?.toID() ?: return@setOnClickListener
-
-            NavigationHelper.navigateVideo(requireContext(), firstVideoId, channelId = channelId)
+        binding.showMore.setOnClickListener {
+            ChannelOptionsBottomSheet()
+                .apply {
+                    arguments = bundleOf(
+                        IntentData.channelId to channelId,
+                        IntentData.channelName to channelName,
+                        IntentData.isSubscribed to isSubscribed
+                    )
+                }
+                .show(childFragmentManager)
         }
 
         nextPages[0] = response.nextpage
@@ -235,9 +211,7 @@ class ChannelFragment : DynamicLayoutManagerFragment(R.layout.fragment_channel) 
             tab.text = tabList[position].name
         }.attach()
 
-        channelAdapter = VideosAdapter(
-            forceMode = VideosAdapter.Companion.LayoutMode.CHANNEL_ROW
-        ).also {
+        channelAdapter = VideosAdapter(showChannelInfo = false).also {
             it.submitList(response.relatedStreams)
         }
         tabList.clear()

@@ -2,6 +2,10 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <!-- ===================== -->
+    <!--      MAIN TOGGLES     -->
+    <!-- ===================== -->
+
     <SwitchPreferenceCompat
         android:summaryOff="@string/disabled"
         android:summaryOn="@string/enabled"
@@ -55,10 +59,19 @@
         app:key="sb_enable_custom_colors"
         app:title="@string/sb_custom_colors" />
 
+
+    <!-- ===================== -->
+    <!--     SEGMENT TYPES     -->
+    <!-- ===================== -->
+
     <PreferenceCategory app:title="@string/category_segments">
 
-        <!-- When changing default values, they must also be changed in the PlayerHelper.kt file! -->
+        <!-- NOTE:
+             When changing default values,
+             also update PlayerHelper.kt accordingly.
+        -->
 
+        <!-- Sponsor -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="automatic"
             app:key="sponsor_category"
@@ -71,6 +84,7 @@
             app:key="sponsor_color"
             app:title="@string/color" />
 
+        <!-- Self Promo -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="automatic"
             app:key="selfpromo_category"
@@ -83,6 +97,7 @@
             app:key="selfpromo_color"
             app:title="@string/color" />
 
+        <!-- Interaction -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="interaction_category"
@@ -95,6 +110,7 @@
             app:key="interaction_color"
             app:title="@string/color" />
 
+        <!-- Intro -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="intro_category"
@@ -107,6 +123,7 @@
             app:key="intro_color"
             app:title="@string/color" />
 
+        <!-- Outro -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="outro_category"
@@ -119,6 +136,7 @@
             app:key="outro_color"
             app:title="@string/color" />
 
+        <!-- Filler -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="filler_category"
@@ -131,6 +149,7 @@
             app:key="filler_color"
             app:title="@string/color" />
 
+        <!-- Music Offtopic -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="music_offtopic_category"
@@ -143,11 +162,19 @@
             app:key="music_offtopic_color"
             app:title="@string/color" />
 
+        <!-- Preview -->
         <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
             app:defaultValue="off"
             app:key="preview_category"
             app:summary="@string/category_preview_summary"
             app:title="@string/category_preview" />
+
+        <!-- Hook (NEW) -->
+        <com.avinashpatil.app.youtube.ui.views.SbSpinnerPreference
+            app:defaultValue="off"
+            app:key="hook_category"
+            app:summary="@string/category_hook_summary"
+            app:title="@string/category_hook" />
 
         <com.avinashpatil.app.youtube.ui.views.ColorPreference
             android:dependency="sb_enable_custom_colors"

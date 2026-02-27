@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
 
     <!-- Colors for Main Activity Background -->
@@ -436,5 +437,7 @@
     <color name="violet_theme_dark_inverseOnSurface">#2B0052</color>
     <color name="violet_theme_dark_inverseSurface">#EFDBFF</color>
     <color name="violet_theme_dark_inversePrimary">#714AAA</color>
+
+    <color name="splash_screen_icon_color">#222222</color>
 
 </resources>

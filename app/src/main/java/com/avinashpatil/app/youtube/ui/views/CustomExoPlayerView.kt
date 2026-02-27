@@ -1,7 +1,6 @@
 package com.avinashpatil.app.youtube.ui.views
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -10,9 +9,9 @@ import android.os.Handler
 import android.os.Looper
 import android.text.format.DateUtils
 import android.util.AttributeSet
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.View
 import android.view.Window
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -27,8 +26,10 @@ import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.view.marginStart
 import androidx.core.view.updateLayoutParams
+import androidx.fragment.app.findFragment
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.text.Cue
 import androidx.media3.session.MediaController
@@ -40,6 +41,7 @@ import androidx.media3.ui.TimeBar
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
+import com.avinashpatil.app.youtube.databinding.CustomExoPlayerViewTemplateBinding
 import com.avinashpatil.app.youtube.databinding.DoubleTapOverlayBinding
 import com.avinashpatil.app.youtube.databinding.ExoStyledPlayerControlViewBinding
 import com.avinashpatil.app.youtube.databinding.PlayerGestureControlsViewBinding
@@ -52,13 +54,12 @@ import com.avinashpatil.app.youtube.extensions.togglePlayPauseState
 import com.avinashpatil.app.youtube.extensions.updateIfChanged
 import com.avinashpatil.app.youtube.helpers.AudioHelper
 import com.avinashpatil.app.youtube.helpers.BrightnessHelper
-import com.avinashpatil.app.youtube.helpers.ContextHelper
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.helpers.WindowHelper
 import com.avinashpatil.app.youtube.obj.BottomSheetItem
-import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
+import com.avinashpatil.app.youtube.ui.controllers.FullscreenGestureAnimationController
 import com.avinashpatil.app.youtube.ui.extensions.toggleSystemBars
 import com.avinashpatil.app.youtube.ui.fragments.PlayerFragment
 import com.avinashpatil.app.youtube.ui.interfaces.PlayerGestureOptions
@@ -70,7 +71,9 @@ import com.avinashpatil.app.youtube.ui.sheets.ChaptersBottomSheet
 import com.avinashpatil.app.youtube.ui.sheets.PlaybackOptionsSheet
 import com.avinashpatil.app.youtube.ui.sheets.PlayingQueueSheet
 import com.avinashpatil.app.youtube.ui.sheets.SleepTimerSheet
+import com.avinashpatil.app.youtube.ui.tools.SleepTimer
 import com.avinashpatil.app.youtube.util.PlayingQueue
+import kotlin.math.ceil
 
 @SuppressLint("ClickableViewAccessibility")
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -80,16 +83,20 @@ abstract class CustomExoPlayerView(
 ) : PlayerView(context, attributeSet), PlayerOptions, PlayerGestureOptions {
     @Suppress("LeakingThis")
     val binding = ExoStyledPlayerControlViewBinding.bind(this)
+    val backgroundBinding = CustomExoPlayerViewTemplateBinding.bind(this)
 
     /**
      * Objects for player tap and swipe gesture
      */
-    private lateinit var gestureViewBinding: PlayerGestureControlsViewBinding
-    private lateinit var playerGestureController: PlayerGestureController
-    private lateinit var brightnessHelper: BrightnessHelper
-    private lateinit var audioHelper: AudioHelper
+    private val gestureViewBinding: PlayerGestureControlsViewBinding get() = backgroundBinding.playerGestureControlsView.binding
+    private val doubleTapOverlayBinding: DoubleTapOverlayBinding get() = backgroundBinding.doubleTapOverlay.binding
+
+    private var playerGestureController: PlayerGestureController
+    private var brightnessHelper: BrightnessHelper
+    private var audioHelper: AudioHelper
     private lateinit var chaptersViewModel: ChaptersViewModel
-    private var doubleTapOverlayBinding: DoubleTapOverlayBinding? = null
+    private lateinit var seekBarListener: TimeBar.OnScrubListener
+    private var fullscreenGestureAnimationController: FullscreenGestureAnimationController
     private var chaptersBottomSheet: ChaptersBottomSheet? = null
     private var scrubbingTimeBar = false
 
@@ -106,39 +113,62 @@ abstract class CustomExoPlayerView(
             updateCurrentPosition()
         }
 
-    /**
-     * Preferences
-     */
-    private var resizeModePref = PlayerHelper.resizeModePref
+    private var resizeModePref: Int
+        set(value) {
+            PreferenceHelper.putInt(
+                PreferenceKeys.PLAYER_RESIZE_MODE,
+                value
+            )
+        }
+        get() = PreferenceHelper.getInt(
+            PreferenceKeys.PLAYER_RESIZE_MODE,
+            AspectRatioFrameLayout.RESIZE_MODE_FIT
+        )
+    private val resizeModes = listOf(
+        AspectRatioFrameLayout.RESIZE_MODE_FIT to R.string.resize_mode_fit,
+        AspectRatioFrameLayout.RESIZE_MODE_ZOOM to R.string.resize_mode_zoom,
+        AspectRatioFrameLayout.RESIZE_MODE_FILL to R.string.resize_mode_fill
+    )
 
     val activity get() = context as BaseActivity
 
     private val supportFragmentManager
         get() = activity.supportFragmentManager
 
-    private fun toggleController() {
-        if (isControllerFullyVisible) hideController() else showController()
+    /**
+     * Playback speed that has been set before the fast forward mode
+     * has been triggered by a long press.
+     */
+    private var rememberedPlaybackSpeed: Float? = null
+
+    private fun toggleController(show: Boolean = !isControllerFullyVisible) {
+        if (show) showController() else hideController()
     }
 
-    fun initialize(
-        doubleTapOverlayBinding: DoubleTapOverlayBinding,
-        playerGestureControlsViewBinding: PlayerGestureControlsViewBinding,
-        chaptersViewModel: ChaptersViewModel
-    ) {
-        this.doubleTapOverlayBinding = doubleTapOverlayBinding
-        this.gestureViewBinding = playerGestureControlsViewBinding
-        this.chaptersViewModel = chaptersViewModel
-        this.playerGestureController = PlayerGestureController(context as BaseActivity, this)
-        this.brightnessHelper = BrightnessHelper(context as Activity)
-        this.audioHelper = AudioHelper(context)
+    init {
+        brightnessHelper = BrightnessHelper(activity)
+        playerGestureController = PlayerGestureController(activity, this)
+        audioHelper = AudioHelper(context)
+        fullscreenGestureAnimationController = FullscreenGestureAnimationController(
+            playerView = this,
+            videoFrameView = backgroundBinding.exoContentFrame,
+            onSwipeUpCompleted = {
+                if (!isFullscreen()) togglePlayerFullscreen(true)
+            },
+            onSwipeDownCompleted = ::minimizeOrExitPlayer
+        )
+    }
 
-        // Set touch listener for tap and swipe gestures.
-        setOnTouchListener(playerGestureController)
+    fun initialize(chaptersViewModel: ChaptersViewModel) {
+        this.chaptersViewModel = chaptersViewModel
+
         initializeGestureProgress()
 
         initRewindAndForward()
         applyCaptionsStyle()
         initializeAdvancedOptions()
+
+        setupKeyboardFocus()
 
         // don't let the player view hide its controls automatically
         controllerShowTimeoutMs = -1
@@ -167,11 +197,7 @@ abstract class CustomExoPlayerView(
             if (isFullscreen()) toggleSystemBars(!isPlayerLocked)
         }
 
-        resizeMode = when (resizeModePref) {
-            "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-        }
+        resizeMode = resizeModePref
 
         binding.playPauseBTN.setOnClickListener {
             player?.togglePlayPauseState()
@@ -182,6 +208,11 @@ abstract class CustomExoPlayerView(
                 super.onEvents(player, events)
                 this@CustomExoPlayerView.onPlaybackEvents(player, events)
             }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                super.onIsPlayingChanged(isPlaying)
+                keepScreenOn = isPlaying
+            }
         })
 
         player?.let { player ->
@@ -190,27 +221,34 @@ abstract class CustomExoPlayerView(
             )
         }
 
-        player?.let { binding.exoProgress.setPlayer(it) }
+        player?.let {
+            binding.exoProgress.setPlayer(it)
+            if (it.isPlaying) keepScreenOn = true
+        }
+
         // prevent the controls from disappearing while scrubbing the time bar
-        binding.exoProgress.addSeekBarListener(object : TimeBar.OnScrubListener {
-            override fun onScrubStart(timeBar: TimeBar, position: Long) {
-                cancelHideControllerTask()
+        if (!::seekBarListener.isInitialized) {
+            seekBarListener = object : TimeBar.OnScrubListener {
+                override fun onScrubStart(timeBar: TimeBar, position: Long) {
+                    cancelHideControllerTask()
+                }
+
+                override fun onScrubMove(timeBar: TimeBar, position: Long) {
+                    cancelHideControllerTask()
+
+                    setCurrentChapterName(forceUpdate = true, enqueueNew = false)
+                    scrubbingTimeBar = true
+                }
+
+                override fun onScrubStop(timeBar: TimeBar, position: Long, canceled: Boolean) {
+                    enqueueHideControllerTask()
+
+                    setCurrentChapterName(forceUpdate = true, enqueueNew = false)
+                    scrubbingTimeBar = false
+                }
             }
-
-            override fun onScrubMove(timeBar: TimeBar, position: Long) {
-                cancelHideControllerTask()
-
-                setCurrentChapterName(forceUpdate = true, enqueueNew = false)
-                scrubbingTimeBar = true
-            }
-
-            override fun onScrubStop(timeBar: TimeBar, position: Long, canceled: Boolean) {
-                enqueueHideControllerTask()
-
-                setCurrentChapterName(forceUpdate = true, enqueueNew = false)
-                scrubbingTimeBar = false
-            }
-        })
+            binding.exoProgress.addSeekBarListener(seekBarListener)
+        }
 
         binding.autoPlay.isChecked = PlayerHelper.autoPlayEnabled
 
@@ -310,6 +348,15 @@ abstract class CustomExoPlayerView(
         }
     }
 
+    /**
+     * focus the player view so that all keyboard events will be moved here
+     */
+    private fun setupKeyboardFocus() {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        requestFocus()
+    }
+
     fun toggleSystemBars(showBars: Boolean) {
         getWindow().toggleSystemBars(
             types = if (showBars) {
@@ -350,6 +397,10 @@ abstract class CustomExoPlayerView(
         // remove the callback to hide the controller
         cancelHideControllerTask()
         super.hideController()
+        backgroundBinding.exoControlsBackground.animate()
+            .alpha(0f)
+            .setDuration(500)
+            .start()
     }
 
     override fun showController() {
@@ -358,6 +409,10 @@ abstract class CustomExoPlayerView(
         // automatically hide the controller after 2 seconds
         enqueueHideControllerTask()
         super.showController()
+        backgroundBinding.exoControlsBackground.animate()
+            .alpha(1f)
+            .setDuration(200)
+            .start()
     }
 
     fun showControllerPermanently() {
@@ -366,28 +421,26 @@ abstract class CustomExoPlayerView(
         super.showController()
     }
 
-    override fun onTouchEvent(event: MotionEvent) = false
-
     private fun initRewindAndForward() {
         val seekIncrementText = (PlayerHelper.seekIncrement / 1000).toString()
         listOf(
-            doubleTapOverlayBinding?.rewindTV,
-            doubleTapOverlayBinding?.forwardTV,
-            binding.forwardTV,
-            binding.rewindTV
+            doubleTapOverlayBinding.rewindLayout.rewindTV,
+            doubleTapOverlayBinding.forwardLayout.forwardTV,
+            binding.seekButtonForward.forwardTV,
+            binding.seekButtonRewind.rewindTV
         ).forEach {
-            it?.text = seekIncrementText
+            it.text = seekIncrementText
         }
-        binding.forwardBTN.setOnClickListener {
+        binding.seekButtonForward.forwardBTN.setOnClickListener {
             player?.seekBy(PlayerHelper.seekIncrement)
         }
-        binding.rewindBTN.setOnClickListener {
+        binding.seekButtonRewind.rewindBTN.setOnClickListener {
             player?.seekBy(-PlayerHelper.seekIncrement)
         }
-        if (PlayerHelper.doubleTapToSeek) return
 
-        listOf(binding.forwardBTN, binding.rewindBTN).forEach {
-            it.isVisible = true
+        if (!PlayerHelper.doubleTapToSeek) {
+            binding.seekButtonForward.forwardBTN.isVisible = !isPlayerLocked
+            binding.seekButtonRewind.rewindBTN.isVisible = !isPlayerLocked
         }
     }
 
@@ -418,16 +471,8 @@ abstract class CustomExoPlayerView(
             context.getString(R.string.player_resize_mode),
             R.drawable.ic_aspect_ratio,
             {
-                when (resizeMode) {
-                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> context.getString(
-                        R.string.resize_mode_fit
-                    )
-
-                    AspectRatioFrameLayout.RESIZE_MODE_FILL -> context.getString(
-                        R.string.resize_mode_fill
-                    )
-
-                    else -> context.getString(R.string.resize_mode_zoom)
+                resizeModes.find { it.first == resizeMode }?.second?.let {
+                    context.getString(it)
                 }
             }
         ) {
@@ -444,7 +489,20 @@ abstract class CustomExoPlayerView(
         },
         BottomSheetItem(
             context.getString(R.string.sleep_timer),
-            R.drawable.ic_sleep
+            R.drawable.ic_sleep,
+            {
+                if (SleepTimer.timeLeftMillis > 0) {
+                    val minutesLeft =
+                        ceil(SleepTimer.timeLeftMillis.toDouble() / DateUtils.MINUTE_IN_MILLIS).toInt()
+                    context.resources.getQuantityString(
+                        R.plurals.minutes_left,
+                        minutesLeft,
+                        minutesLeft
+                    )
+                } else {
+                    context.getString(R.string.disabled)
+                }
+            }
         ) {
             onSleepTimerClicked()
         }
@@ -461,12 +519,12 @@ abstract class CustomExoPlayerView(
         binding.playPauseBTN.isVisible = isLocked
 
         if (!PlayerHelper.doubleTapToSeek) {
-            binding.rewindBTN.isVisible = isLocked
-            binding.forwardBTN.isVisible = isLocked
+            binding.seekButtonRewind.rewindBTN.isVisible = isLocked
+            binding.seekButtonForward.forwardBTN.isVisible = isLocked
         }
 
         // hide the dimming background overlay if locked
-        binding.exoControlsBackground.setBackgroundColor(
+        backgroundBinding.exoControlsBackground.setBackgroundColor(
             if (isLocked) {
                 ContextCompat.getColor(
                     context,
@@ -478,20 +536,25 @@ abstract class CustomExoPlayerView(
         )
 
         // disable tap and swipe gesture if the player is locked
-        playerGestureController.isEnabled = isLocked
+        playerGestureController.areControlsLocked = !isLocked
     }
 
     private fun rewind() {
         player?.seekBy(-PlayerHelper.seekIncrement)
 
         // show the rewind button
-        doubleTapOverlayBinding?.apply {
-            animateSeeking(rewindBTN, rewindIV, rewindTV, true)
+        doubleTapOverlayBinding.apply {
+            animateSeeking(
+                rewindLayout.rewindBTN,
+                rewindLayout.rewindIV,
+                rewindLayout.rewindTV,
+                true
+            )
 
             // start callback to hide the button
             runnableHandler.removeCallbacksAndMessages(HIDE_REWIND_BUTTON_TOKEN)
             runnableHandler.postDelayed(700, HIDE_REWIND_BUTTON_TOKEN) {
-                rewindBTN.isGone = true
+                rewindLayout.rewindBTN.isGone = true
             }
         }
     }
@@ -500,13 +563,18 @@ abstract class CustomExoPlayerView(
         player?.seekBy(PlayerHelper.seekIncrement)
 
         // show the forward button
-        doubleTapOverlayBinding?.apply {
-            animateSeeking(forwardBTN, forwardIV, forwardTV, false)
+        doubleTapOverlayBinding.apply {
+            animateSeeking(
+                forwardLayout.forwardBTN,
+                forwardLayout.forwardIV,
+                forwardLayout.forwardTV,
+                false
+            )
 
             // start callback to hide the button
             runnableHandler.removeCallbacksAndMessages(HIDE_FORWARD_BUTTON_TOKEN)
             runnableHandler.postDelayed(700, HIDE_FORWARD_BUTTON_TOKEN) {
-                forwardBTN.isGone = true
+                forwardLayout.forwardBTN.isGone = true
             }
         }
     }
@@ -595,7 +663,7 @@ abstract class CustomExoPlayerView(
     private fun updateVolume(distance: Float) {
         val bar = gestureViewBinding.volumeProgressBar
         gestureViewBinding.volumeControlView.apply {
-            if (visibility == View.GONE) {
+            if (isGone) {
                 isVisible = true
                 // Volume could be changed using other mediums, sync progress
                 // bar with new value.
@@ -625,23 +693,22 @@ abstract class CustomExoPlayerView(
 
     override fun onResizeModeClicked() {
         // switching between original aspect ratio (black bars) and zoomed to fill device screen
-        val aspectRatioModeNames = context.resources?.getStringArray(R.array.resizeMode)
-            ?.toList().orEmpty()
-
-        val aspectRatioModes = listOf(
-            AspectRatioFrameLayout.RESIZE_MODE_FIT,
-            AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
-            AspectRatioFrameLayout.RESIZE_MODE_FILL
-        )
-
         BaseBottomSheet()
             .setSimpleItems(
-                aspectRatioModeNames,
-                preselectedItem = aspectRatioModeNames[aspectRatioModes.indexOf(resizeMode)]
+                resizeModes.map { context.getString(it.second) },
+                preselectedItem = resizeModes.first { it.first == resizeMode }.second.let {
+                    context.getString(it)
+                }
             ) { index ->
-                resizeMode = aspectRatioModes[index]
+                resizeMode = resizeModes[index].first
             }
             .show(supportFragmentManager)
+    }
+
+    override fun setResizeMode(resizeMode: Int) {
+        super.setResizeMode(resizeMode)
+        // automatically remember the resize mode for the next session
+        resizeModePref = resizeMode
     }
 
     override fun onRepeatModeClicked() {
@@ -701,6 +768,22 @@ abstract class CustomExoPlayerView(
                 marginEnd = horizontalMargin
             }
         }
+
+        binding.fullscreen.layoutParams =
+            (binding.fullscreen.layoutParams as MarginLayoutParams).apply {
+                if (isFullscreen()) {
+                    // Add extra bottom margin in fullscreen mode
+                    bottomMargin =
+                        resources.getDimensionPixelSize(R.dimen.fullscreen_button_margin_bottom)
+                    marginEnd =
+                        resources.getDimensionPixelSize(R.dimen.fullscreen_button_margin_end)
+                } else {
+                    // Reset to default margin
+                    bottomMargin =
+                        resources.getDimensionPixelSize(R.dimen.normal_button_margin_bottom)
+                    marginEnd = resources.getDimensionPixelSize(R.dimen.normal_button_margin_end)
+                }
+            }
     }
 
     /**
@@ -718,15 +801,6 @@ abstract class CustomExoPlayerView(
         }
     }
 
-    /**
-     * Add extra margin to the top bar to not overlap the status bar.
-     */
-    fun updateTopBarMargin() {
-        binding.topBar.updateLayoutParams<MarginLayoutParams> {
-            topMargin = (if (isFullscreen()) 18f else 0f).dpToPx()
-        }
-    }
-
     @SuppressLint("SetTextI18n")
     private fun updateCurrentPosition() {
         val position = player?.currentPosition?.div(1000) ?: 0
@@ -740,7 +814,21 @@ abstract class CustomExoPlayerView(
         runnableHandler.postDelayed(100, UPDATE_POSITION_TOKEN, this::updateCurrentPosition)
     }
 
-    override fun onSingleTap() {
+    /**
+     * Add extra margin to the top bar to not overlap the status bar.
+     */
+    fun updateTopBarMargin() {
+        binding.topBar.updateLayoutParams<MarginLayoutParams> {
+            topMargin = (if (isFullscreen()) 18f else 0f).dpToPx()
+        }
+    }
+
+    override fun onSingleTap(areControlsLocked: Boolean) {
+        if (areControlsLocked) {
+            // keep showing the 'locked' icon
+            toggleController(true)
+            return
+        }
         toggleController()
     }
 
@@ -758,9 +846,9 @@ abstract class CustomExoPlayerView(
         forward()
     }
 
-    override fun onSwipeLeftScreen(distanceY: Float) {
+    override fun onSwipeLeftScreen(distanceY: Float, positionY: Float) {
         if (!PlayerHelper.swipeGestureEnabled) {
-            if (PlayerHelper.fullscreenGesturesEnabled) onSwipeCenterScreen(distanceY)
+            if (PlayerHelper.fullscreenGesturesEnabled) onSwipeCenterScreen(distanceY, positionY)
             return
         }
 
@@ -768,9 +856,9 @@ abstract class CustomExoPlayerView(
         updateBrightness(distanceY)
     }
 
-    override fun onSwipeRightScreen(distanceY: Float) {
+    override fun onSwipeRightScreen(distanceY: Float, positionY: Float) {
         if (!PlayerHelper.swipeGestureEnabled) {
-            if (PlayerHelper.fullscreenGesturesEnabled) onSwipeCenterScreen(distanceY)
+            if (PlayerHelper.fullscreenGesturesEnabled) onSwipeCenterScreen(distanceY, positionY)
             return
         }
 
@@ -778,17 +866,13 @@ abstract class CustomExoPlayerView(
         updateVolume(distanceY)
     }
 
-    override fun onSwipeCenterScreen(distanceY: Float) {
+    override fun onSwipeCenterScreen(distanceY: Float, positionY: Float) {
         if (!PlayerHelper.fullscreenGesturesEnabled) return
-
-        if (isControllerFullyVisible) hideController()
-        if (distanceY >= 0) return
-
-        playerGestureController.isMoving = false
-        minimizeOrExitPlayer()
+        fullscreenGestureAnimationController.onSwipe(distanceY, positionY)
     }
 
     override fun onSwipeEnd() {
+        fullscreenGestureAnimationController.onSwipeEnd()
         gestureViewBinding.brightnessControlView.isGone = true
         gestureViewBinding.volumeControlView.isGone = true
     }
@@ -805,12 +889,47 @@ abstract class CustomExoPlayerView(
     override fun onMinimize() {
         if (!PlayerHelper.pinchGestureEnabled) return
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+
         subtitleView?.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION)
+    }
+
+    override fun onLongPress() {
+        if (!PlayerHelper.doubleTapToSeek) return
+
+        backgroundBinding.fastForwardView.isVisible = true
+        val player = player ?: return
+
+        // using the fast forward action wouldn't change anything in this case
+        if (player.playbackParameters.speed >= PlayerHelper.MAXIMUM_PLAYBACK_SPEED) {
+            return
+        }
+
+        // backup current playback speed in order to restore it
+        // after the fast forward action is done
+        rememberedPlaybackSpeed = player.playbackParameters.speed
+
+        val newSpeed = minOf(
+            player.playbackParameters.speed * PlayerHelper.FAST_FORWARD_SPEED_FACTOR,
+            PlayerHelper.MAXIMUM_PLAYBACK_SPEED
+        )
+        player.playbackParameters = PlaybackParameters(newSpeed, player.playbackParameters.pitch)
+    }
+
+    override fun onLongPressEnd() {
+        if (!PlayerHelper.doubleTapToSeek) return
+
+        backgroundBinding.fastForwardView.isGone = true
+
+        val player = player ?: return
+        rememberedPlaybackSpeed?.let {
+            player.playbackParameters = PlaybackParameters(it, player.playbackParameters.pitch)
+        }
+        rememberedPlaybackSpeed = null
     }
 
     override fun onFullscreenChange(isFullscreen: Boolean) {
         if (isFullscreen) {
-            if (PlayerHelper.swipeGestureEnabled && this::brightnessHelper.isInitialized) {
+            if (PlayerHelper.swipeGestureEnabled) {
                 brightnessHelper.restoreSavedBrightness()
             }
             subtitleView?.setFixedTextSize(
@@ -821,8 +940,8 @@ abstract class CustomExoPlayerView(
                 subtitleView?.setBottomPaddingFraction(SUBTITLE_BOTTOM_PADDING_FRACTION)
             }
         } else {
-            if (PlayerHelper.swipeGestureEnabled && this::brightnessHelper.isInitialized) {
-                brightnessHelper.resetToSystemBrightness(false)
+            if (PlayerHelper.swipeGestureEnabled) {
+                brightnessHelper.resetToSystemBrightness()
             }
             subtitleView?.setFixedTextSize(
                 Cue.TEXT_SIZE_TYPE_ABSOLUTE,
@@ -830,6 +949,8 @@ abstract class CustomExoPlayerView(
             )
             subtitleView?.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION)
         }
+
+        updateMarginsByFullscreenMode()
     }
 
     /**
@@ -844,7 +965,14 @@ abstract class CustomExoPlayerView(
         return super.onInterceptTouchEvent(ev)
     }
 
-    fun onKeyBoardAction(keyCode: Int): Boolean {
+    override fun onTouchEvent(event: MotionEvent?): Boolean {
+        if (event == null) return false
+        if (!useController) return false
+
+        return playerGestureController.onTouchEvent(event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                 player?.togglePlayPauseState()
@@ -867,16 +995,21 @@ abstract class CustomExoPlayerView(
             }
 
             KeyEvent.KEYCODE_F -> {
-                val fragmentManager =
-                    ContextHelper.unwrapActivity<MainActivity>(context).supportFragmentManager
-                fragmentManager.fragments.filterIsInstance<PlayerFragment>().firstOrNull()
-                    ?.toggleFullscreen()
+                togglePlayerFullscreen()
             }
 
             else -> return false
         }
 
         return true
+    }
+
+    fun togglePlayerFullscreen(isFullscreen: Boolean = !isFullscreen()) {
+        try {
+            findFragment<PlayerFragment>().toggleFullscreen(isFullscreen)
+        } catch (error: IllegalStateException) {
+            Log.e(this::class.simpleName, error.message.toString())
+        }
     }
 
     override fun getViewMeasures(): Pair<Int, Int> {
@@ -897,6 +1030,11 @@ abstract class CustomExoPlayerView(
             // keep screen on if the video is playing
             keepScreenOn = player.isPlaying == true
             onPlayerEvent(player, events)
+        }
+
+        if (events.contains(Player.EVENT_RENDERED_FIRST_FRAME)) {
+            // if the video is not starting automatically, show the controller
+            if (!PlayerHelper.playAutomatically) showControllerPermanently()
         }
     }
 

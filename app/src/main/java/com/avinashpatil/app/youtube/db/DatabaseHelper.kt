@@ -6,6 +6,7 @@ import com.avinashpatil.app.youtube.db.DatabaseHolder.Database
 import com.avinashpatil.app.youtube.db.obj.SearchHistoryItem
 import com.avinashpatil.app.youtube.db.obj.WatchHistoryItem
 import com.avinashpatil.app.youtube.enums.ContentFilter
+import com.avinashpatil.app.youtube.enums.FileType
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,12 @@ import kotlinx.coroutines.withContext
 
 object DatabaseHelper {
     private const val MAX_SEARCH_HISTORY_SIZE = 20
+
+    // can only mark as watched if less than 60s remaining
+    private const val ABSOLUTE_WATCHED_THRESHOLD = 60.0f
+
+    // can only mark as watched if at least 75% watched
+    private const val RELATIVE_WATCHED_THRESHOLD = 0.75f
 
     suspend fun addToWatchHistory(watchHistoryItem: WatchHistoryItem) =
         withContext(Dispatchers.IO) {
@@ -79,8 +86,8 @@ object DatabaseHelper {
         if (durationSeconds == null) return false
 
         val progress = positionMillis / 1000
-        // show video only in feed when watched less than 90%
-        return progress > 0.9f * durationSeconds
+
+        return durationSeconds - progress <= ABSOLUTE_WATCHED_THRESHOLD && progress >= RELATIVE_WATCHED_THRESHOLD * durationSeconds
     }
 
     suspend fun filterUnwatched(streams: List<StreamItem>): List<StreamItem> {
@@ -89,22 +96,25 @@ object DatabaseHelper {
         }
     }
 
+    /**
+     * @param unfinished If true, only returns unfinished videos. If false, only returns finished videos.
+     */
     suspend fun filterByWatchStatus(
-        streams: List<WatchHistoryItem>,
+        watchHistoryItem: WatchHistoryItem,
         unfinished: Boolean = true
-    ): List<WatchHistoryItem> {
-        return streams.filter {
-            unfinished xor isVideoWatched(it.videoId, it.duration ?: 0)
-        }
+    ): Boolean {
+        return unfinished xor isVideoWatched(watchHistoryItem.videoId, watchHistoryItem.duration ?: 0)
     }
 
-    fun filterByStatusAndWatchPosition(
+    suspend fun filterByStreamTypeAndWatchPosition(
         streams: List<StreamItem>,
-        hideWatched: Boolean
+        hideWatched: Boolean,
+        showUpcoming: Boolean
     ): List<StreamItem> {
         val streamItems = streams.filter {
-            val isVideo = !it.isShort && !it.isLive
+            if (!showUpcoming && it.isUpcoming) return@filter false
 
+            val isVideo = !it.isShort && !it.isLive
             return@filter when {
                 !ContentFilter.SHORTS.isEnabled && it.isShort -> false
                 !ContentFilter.VIDEOS.isEnabled && isVideo -> false
@@ -112,13 +122,8 @@ object DatabaseHelper {
                 else -> true
             }
         }
+        if (!hideWatched) return streamItems
 
-        return if (hideWatched) {
-            runBlocking {
-                filterUnwatched(streamItems)
-            }
-        } else {
-            streamItems
-        }
+        return filterUnwatched(streamItems)
     }
 }

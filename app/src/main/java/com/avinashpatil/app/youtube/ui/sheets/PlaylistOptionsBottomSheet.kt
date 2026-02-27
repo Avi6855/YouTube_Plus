@@ -3,8 +3,8 @@ package com.avinashpatil.app.youtube.ui.sheets
 import android.os.Bundle
 import androidx.core.os.bundleOf
 import com.avinashpatil.app.youtube.R
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.db.DatabaseHolder
 import com.avinashpatil.app.youtube.enums.ImportFormat
@@ -163,10 +163,10 @@ class PlaylistOptionsBottomSheet : BaseBottomSheet() {
                         context,
                         R.string.export_playlist,
                         BackupRestoreSettings.exportPlaylistFormatList + listOf(ImportFormat.URLSORIDS)
-                    ) {
-                        exportFormat = it
+                    ) { format, includeTimestamp ->
+                        exportFormat = format
                         ContextHelper.unwrapActivity<MainActivity>(context)
-                            .startPlaylistExport(playlistId, playlistName, exportFormat)
+                            .startPlaylistExport(playlistId, playlistName, exportFormat, includeTimestamp)
                     }
                 }
 
@@ -176,7 +176,7 @@ class PlaylistOptionsBottomSheet : BaseBottomSheet() {
                             DatabaseHolder.Database.playlistBookmarkDao().deleteById(playlistId)
                         } else {
                             val bookmark = try {
-                                RetrofitInstance.api.getPlaylist(playlistId)
+                                MediaServiceRepository.instance.getPlaylist(playlistId)
                             } catch (e: Exception) {
                                 return@withContext
                             }.toPlaylistBookmark(playlistId)

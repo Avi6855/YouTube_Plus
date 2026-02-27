@@ -2,72 +2,48 @@ package com.avinashpatil.app.youtube.ui.fragments
 
 import android.content.res.Configuration
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.Parcelable
 import android.view.View
-import androidx.core.os.postDelayed
+import android.view.ViewGroup.MarginLayoutParams
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
+import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.fragment.app.activityViewModels
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.room.withTransaction
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.databinding.FragmentWatchHistoryBinding
-import com.avinashpatil.app.youtube.db.DatabaseHelper
 import com.avinashpatil.app.youtube.db.DatabaseHolder.Database
 import com.avinashpatil.app.youtube.db.obj.WatchHistoryItem
 import com.avinashpatil.app.youtube.extensions.ceilHalf
 import com.avinashpatil.app.youtube.extensions.dpToPx
 import com.avinashpatil.app.youtube.extensions.setOnDismissListener
-import com.avinashpatil.app.youtube.helpers.NavBarHelper
 import com.avinashpatil.app.youtube.helpers.NavigationHelper
-import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.ui.adapters.WatchHistoryAdapter
 import com.avinashpatil.app.youtube.ui.base.DynamicLayoutManagerFragment
 import com.avinashpatil.app.youtube.ui.extensions.addOnBottomReachedListener
-import com.avinashpatil.app.youtube.ui.extensions.setupFragmentAnimation
 import com.avinashpatil.app.youtube.ui.models.CommonPlayerViewModel
-import com.avinashpatil.app.youtube.ui.sheets.BaseBottomSheet
+import com.avinashpatil.app.youtube.ui.models.WatchHistoryModel
 import com.avinashpatil.app.youtube.util.PlayingQueue
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlin.math.ceil
 
 class WatchHistoryFragment : DynamicLayoutManagerFragment(R.layout.fragment_watch_history) {
     private var _binding: FragmentWatchHistoryBinding? = null
     private val binding get() = _binding!!
 
-    private val handler = Handler(Looper.getMainLooper())
     private val commonPlayerViewModel: CommonPlayerViewModel by activityViewModels()
-    private var isLoading = false
     private var recyclerViewState: Parcelable? = null
 
+    private val viewModel: WatchHistoryModel by viewModels()
     private val watchHistoryAdapter = WatchHistoryAdapter()
-
-    private var selectedStatusFilter = PreferenceHelper.getInt(
-        PreferenceKeys.SELECTED_HISTORY_STATUS_FILTER,
-        0
-    )
-        set(value) {
-            PreferenceHelper.putInt(PreferenceKeys.SELECTED_HISTORY_STATUS_FILTER, value)
-            field = value
-        }
-    private var selectedTypeFilter = PreferenceHelper.getInt(
-        PreferenceKeys.SELECTED_HISTORY_TYPE_FILTER,
-        0
-    )
-        set(value) {
-            PreferenceHelper.putInt(PreferenceKeys.SELECTED_HISTORY_TYPE_FILTER, value)
-            field = value
-        }
 
     override fun setLayoutManagers(gridItems: Int) {
         _binding?.watchHistoryRecView?.layoutManager =
@@ -78,12 +54,17 @@ class WatchHistoryFragment : DynamicLayoutManagerFragment(R.layout.fragment_watc
         _binding = FragmentWatchHistoryBinding.bind(view)
         super.onViewCreated(view, savedInstanceState)
 
-        commonPlayerViewModel.isMiniPlayerVisible.observe(viewLifecycleOwner) {
-            _binding?.watchHistoryRecView?.updatePadding(bottom = if (it) 64f.dpToPx() else 0)
+        commonPlayerViewModel.isMiniPlayerVisible.observe(viewLifecycleOwner) { isMiniPlayerVisible ->
+            _binding?.watchHistoryRecView?.updatePadding(bottom = if (isMiniPlayerVisible) 64f.dpToPx() else 0)
+            _binding?.playAll?.updateLayoutParams<MarginLayoutParams> {
+                bottomMargin = (if (isMiniPlayerVisible) 64f else 16f).dpToPx()
+            }
         }
 
         binding.watchHistoryRecView.setOnDismissListener { position ->
-            watchHistoryAdapter.removeFromWatchHistory(position)
+            val item = viewModel.filteredWatchHistory.value?.getOrNull(position)
+                ?: return@setOnDismissListener
+            viewModel.removeFromHistory(item)
         }
 
         // observe changes to indicate if the history is empty
@@ -91,7 +72,7 @@ class WatchHistoryFragment : DynamicLayoutManagerFragment(R.layout.fragment_watc
             RecyclerView.AdapterDataObserver() {
             override fun onItemRangeRemoved(positionStart: Int, itemCount: Int) {
                 if (watchHistoryAdapter.itemCount == 0) {
-                    binding.historyContainer.isGone = true
+                    binding.watchHistoryRecView.isGone = true
                     binding.historyEmpty.isVisible = true
                 }
             }
@@ -103,138 +84,88 @@ class WatchHistoryFragment : DynamicLayoutManagerFragment(R.layout.fragment_watc
         binding.watchHistoryRecView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)
-                recyclerViewState = binding.watchHistoryRecView.layoutManager?.onSaveInstanceState()
+                recyclerViewState = recyclerView.layoutManager?.onSaveInstanceState()
             }
         })
 
-        lifecycleScope.launch {
-            val history = withContext(Dispatchers.IO) {
-                DatabaseHelper.getWatchHistoryPage(1, HISTORY_PAGE_SIZE)
-            }
+        binding.chipContinue.isChecked = viewModel.selectedStatusFilter in arrayOf(0, 1)
+        binding.chipFinished.isChecked = viewModel.selectedStatusFilter in arrayOf(0, 2)
 
-            if (history.isEmpty()) return@launch
+        val watchPositionItem = arrayOf(getString(R.string.also_clear_watch_positions))
+        val selected = booleanArrayOf(false)
 
-            binding.filterTypeTV.text =
-                resources.getStringArray(R.array.filterOptions)[selectedTypeFilter]
-            binding.filterStatusTV.text =
-                resources.getStringArray(R.array.filterStatusOptions)[selectedStatusFilter]
+        binding.clear.setOnClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.clear_history)
+                .setMultiChoiceItems(watchPositionItem, selected) { _, index, newValue ->
+                    selected[index] = newValue
+                }
+                .setPositiveButton(R.string.okay) { _, _ ->
+                    binding.watchHistoryRecView.isGone = true
+                    binding.historyEmpty.isVisible = true
+                    binding.clear.isVisible = true
+                    binding.playAll.isGone = true
+                    binding.statusFilterChips.isGone = true
 
-            val watchPositionItem = arrayOf(getString(R.string.also_clear_watch_positions))
-            val selected = booleanArrayOf(false)
-
-            binding.clear.setOnClickListener {
-                MaterialAlertDialogBuilder(requireContext())
-                    .setTitle(R.string.clear_history)
-                    .setMultiChoiceItems(watchPositionItem, selected) { _, index, newValue ->
-                        selected[index] = newValue
-                    }
-                    .setPositiveButton(R.string.okay) { _, _ ->
-                        binding.historyContainer.isGone = true
-                        binding.historyEmpty.isVisible = true
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            Database.withTransaction {
-                                Database.watchHistoryDao().deleteAll()
-                                if (selected[0]) Database.watchPositionDao().deleteAll()
-                            }
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        Database.withTransaction {
+                            Database.watchHistoryDao().deleteAll()
+                            if (selected[0]) Database.watchPositionDao().deleteAll()
                         }
                     }
-                    .setNegativeButton(R.string.cancel, null)
-                    .show()
-            }
-
-            binding.filterTypeTV.setOnClickListener {
-                val filterOptions = resources.getStringArray(R.array.filterOptions)
-
-                BaseBottomSheet().apply {
-                    setSimpleItems(filterOptions.toList()) { index ->
-                        binding.filterTypeTV.text = filterOptions[index]
-                        selectedTypeFilter = index
-                        showWatchHistory(history)
-                    }
-                }.show(childFragmentManager)
-            }
-
-            binding.filterStatusTV.setOnClickListener {
-                val filterOptions = resources.getStringArray(R.array.filterStatusOptions)
-
-                BaseBottomSheet().apply {
-                    setSimpleItems(filterOptions.toList()) { index ->
-                        binding.filterStatusTV.text = filterOptions[index]
-                        selectedStatusFilter = index
-                        showWatchHistory(history)
-                    }
-                }.show(childFragmentManager)
-            }
-
-            showWatchHistory(history)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
-        if (NavBarHelper.getStartFragmentId(requireContext()) != R.id.watchHistoryFragment) {
-            setupFragmentAnimation(binding.root)
+        binding.statusFilterChips.setOnCheckedStateChangeListener { _, checkedIds ->
+            val continueWatchingEnabled = checkedIds.contains(binding.chipContinue.id)
+            val finishedEnabled = checkedIds.contains(binding.chipFinished.id)
+            viewModel.selectedStatusFilter = when {
+                continueWatchingEnabled && finishedEnabled -> 0
+                continueWatchingEnabled -> 1
+                finishedEnabled -> 2
+                else -> 0
+            }
         }
-    }
-
-    private fun showWatchHistory(history: List<WatchHistoryItem>) {
-        val watchHistory = history.filterByStatusAndWatchPosition()
 
         binding.playAll.setOnClickListener {
+            val history = viewModel.filteredWatchHistory.value.orEmpty()
+            if (history.isEmpty()) return@setOnClickListener
+
             PlayingQueue.add(
-                *watchHistory.reversed().map(WatchHistoryItem::toStreamItem).toTypedArray()
+                *history.reversed().map(WatchHistoryItem::toStreamItem).toTypedArray()
             )
             NavigationHelper.navigateVideo(
                 requireContext(),
-                watchHistory.last().videoId,
+                history.last().videoId,
                 keepQueue = true
             )
         }
-        watchHistoryAdapter.submitList(history)
-        binding.historyEmpty.isGone = true
-        binding.historyContainer.isVisible = true
 
-        // add a listener for scroll end, delay needed to prevent loading new ones the first time
-        handler.postDelayed(200) {
-            if (_binding == null) return@postDelayed
+        viewModel.filteredWatchHistory.observe(viewLifecycleOwner) { history ->
+            binding.historyEmpty.isGone = history.isNotEmpty()
+            binding.watchHistoryRecView.isVisible = history.isNotEmpty()
+            binding.clear.isVisible = history.isNotEmpty()
+            binding.playAll.isVisible = history.isNotEmpty()
 
-            binding.watchHistoryRecView.addOnBottomReachedListener {
-                if (isLoading) return@addOnBottomReachedListener
-                isLoading = true
-
-                lifecycleScope.launch {
-                    val newHistory = withContext(Dispatchers.IO) {
-                        val currentPage = ceil(watchHistoryAdapter.itemCount.toFloat() / HISTORY_PAGE_SIZE).toInt()
-                        DatabaseHelper.getWatchHistoryPage( currentPage + 1, HISTORY_PAGE_SIZE)
-                    }.filterByStatusAndWatchPosition()
-
-                    watchHistoryAdapter.insertItems(newHistory)
-                    isLoading = false
-                }
-            }
+            watchHistoryAdapter.submitList(history)
         }
-    }
 
-    private fun List<WatchHistoryItem>.filterByStatusAndWatchPosition(): List<WatchHistoryItem> {
-        val watchHistoryItem = this.filter {
-            val isLive = (it.duration ?: -1L) < 0L
-            when (selectedTypeFilter) {
-                0 -> true
-                1 -> !it.isShort && !isLive
-                2 -> it.isShort // where is the StreamItem converted to watchHistoryItem?
-                3 -> isLive
-                else -> throw IllegalArgumentException()
+        viewModel.fetchNextPage()
+
+        binding.watchHistoryRecView.addOnBottomReachedListener {
+            viewModel.fetchNextPage()
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val hasItems = Database.watchHistoryDao().getSize() != 0
+
+            withContext(Dispatchers.Main) {
+                binding.clear.isEnabled = hasItems
             }
         }
 
-        if (selectedStatusFilter == 0) {
-            return watchHistoryItem
-        }
-
-        return runBlocking {
-            when (selectedStatusFilter) {
-                1 -> DatabaseHelper.filterByWatchStatus(watchHistoryItem)
-                2 -> DatabaseHelper.filterByWatchStatus(watchHistoryItem, false)
-                else -> throw IllegalArgumentException()
-            }
-        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -246,9 +177,5 @@ class WatchHistoryFragment : DynamicLayoutManagerFragment(R.layout.fragment_watc
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
-
-    companion object {
-        private const val HISTORY_PAGE_SIZE = 10
     }
 }

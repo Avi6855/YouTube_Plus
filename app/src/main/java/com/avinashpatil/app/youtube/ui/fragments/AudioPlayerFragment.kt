@@ -29,9 +29,11 @@ import com.avinashpatil.app.youtube.api.JsonHelper
 import com.avinashpatil.app.youtube.api.obj.ChapterSegment
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.FragmentAudioPlayerBinding
+import com.avinashpatil.app.youtube.enums.PlayerCommand
 import com.avinashpatil.app.youtube.extensions.navigateVideo
 import com.avinashpatil.app.youtube.extensions.normalize
 import com.avinashpatil.app.youtube.extensions.seekBy
+import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.extensions.togglePlayPauseState
 import com.avinashpatil.app.youtube.extensions.updateIfChanged
 import com.avinashpatil.app.youtube.helpers.AudioHelper
@@ -47,6 +49,7 @@ import com.avinashpatil.app.youtube.services.OfflinePlayerService
 import com.avinashpatil.app.youtube.services.OnlinePlayerService
 import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
+import com.avinashpatil.app.youtube.ui.extensions.getSystemInsets
 import com.avinashpatil.app.youtube.ui.extensions.setOnBackPressed
 import com.avinashpatil.app.youtube.ui.interfaces.AudioPlayerOptions
 import com.avinashpatil.app.youtube.ui.listeners.AudioPlayerThumbnailListener
@@ -94,7 +97,6 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         BackgroundHelper.startMediaService(
             requireContext(),
             if (isOffline) OfflinePlayerService::class.java else OnlinePlayerService::class.java,
-            bundleOf()
         ) {
             if (_binding == null) {
                 it.sendCustomCommand(AbstractPlayerService.stopServiceCommand, Bundle.EMPTY)
@@ -112,8 +114,16 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         _binding = FragmentAudioPlayerBinding.bind(view)
         super.onViewCreated(view, savedInstanceState)
 
-        mainActivity?.getBottomNavColor()?.let { color ->
-            binding.audioPlayerContainer.setBackgroundColor(color)
+        // manually apply additional padding for edge-to-edge compatibility
+        activity.getSystemInsets()?.let { systemBars ->
+            with (binding.audioPlayerMain) {
+                setPadding(
+                    paddingLeft,
+                    paddingTop + systemBars.top,
+                    paddingRight,
+                    paddingBottom + systemBars.bottom
+                )
+            }
         }
 
         initializeTransitionLayout()
@@ -145,18 +155,20 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
             playerController?.navigateVideo(PlayingQueue.getNext() ?: return@setOnClickListener)
         }
 
-        listOf(binding.forwardTV, binding.rewindTV).forEach {
-            it.text = (PlayerHelper.seekIncrement / 1000).toString()
-        }
-        binding.rewindFL.setOnClickListener {
+        binding.rewindBTN.setOnClickListener {
             playerController?.seekBy(-PlayerHelper.seekIncrement)
         }
-        binding.forwardFL.setOnClickListener {
+        binding.forwardBTN.setOnClickListener {
             playerController?.seekBy(PlayerHelper.seekIncrement)
         }
 
-        childFragmentManager.setFragmentResultListener(PlayingQueueSheet.PLAYING_QUEUE_REQUEST_KEY, viewLifecycleOwner) { _, args ->
-            playerController?.navigateVideo(args.getString(IntentData.videoId) ?: return@setFragmentResultListener)
+        childFragmentManager.setFragmentResultListener(
+            PlayingQueueSheet.PLAYING_QUEUE_REQUEST_KEY,
+            viewLifecycleOwner
+        ) { _, args ->
+            playerController?.navigateVideo(
+                args.getString(IntentData.videoId) ?: return@setFragmentResultListener
+            )
         }
         binding.openQueue.setOnClickListener {
             PlayingQueueSheet().show(childFragmentManager)
@@ -174,15 +186,8 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         }
 
         binding.openVideo.setOnClickListener {
-            killFragment()
-
-            NavigationHelper.navigateVideo(
-                context = requireContext(),
-                videoUrlOrId = PlayingQueue.getCurrent()?.url,
-                timestamp = playerController?.currentPosition?.div(1000) ?: 0,
-                keepQueue = true,
-                forceVideo = true
-            )
+            val currentId = PlayingQueue.getCurrent()?.url?.toID()
+            switchToVideoMode(currentId ?: return@setOnClickListener)
         }
 
         childFragmentManager.setFragmentResultListener(
@@ -209,7 +214,7 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         }
 
         binding.miniPlayerClose.setOnClickListener {
-            killFragment()
+            killFragment(true)
         }
 
         val listener = AudioPlayerThumbnailListener(requireContext(), this)
@@ -267,8 +272,28 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         }
     }
 
-    private fun killFragment() {
-        playerController?.sendCustomCommand(AbstractPlayerService.stopServiceCommand, Bundle.EMPTY)
+    fun switchToVideoMode(videoId: String) {
+        playerController?.sendCustomCommand(
+            AbstractPlayerService.runPlayerActionCommand,
+            bundleOf(PlayerCommand.TOGGLE_AUDIO_ONLY_MODE.name to false)
+        )
+
+        killFragment(false)
+
+        NavigationHelper.openVideoPlayerFragment(
+            context = requireContext(),
+            videoId = videoId,
+            alreadyStarted = true,
+        )
+    }
+
+    private fun killFragment(stopPlayer: Boolean) {
+        viewModel.isMiniPlayerVisible.value = false
+
+        if (stopPlayer) playerController?.sendCustomCommand(
+            AbstractPlayerService.stopServiceCommand,
+            Bundle.EMPTY
+        )
         playerController?.release()
         playerController = null
 
@@ -433,12 +458,15 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
 
                 updateStreamInfo(mediaMetadata)
                 // JSON-encode as work-around for https://github.com/androidx/media/issues/564
-                val chapters: List<ChapterSegment>? = mediaMetadata.extras?.getString(IntentData.chapters)?.let {
-                    JsonHelper.json.decodeFromString(it)
-                }
+                val chapters: List<ChapterSegment>? =
+                    mediaMetadata.extras?.getString(IntentData.chapters)?.let {
+                        JsonHelper.json.decodeFromString(it)
+                    }
                 _binding?.openChapters?.isVisible = !chapters.isNullOrEmpty()
             }
         })
+        playerController?.mediaMetadata?.let { updateStreamInfo(it) }
+
         initializeSeekBar()
 
         if (isOffline) {
@@ -459,10 +487,7 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
         val current = PlayingQueue.getCurrent() ?: return
         VideoOptionsBottomSheet()
             .apply {
-                arguments = bundleOf(
-                    IntentData.streamItem to current,
-                    IntentData.isCurrentlyPlaying to true
-                )
+                arguments = bundleOf(IntentData.streamItem to current)
             }
             .show(childFragmentManager)
     }
@@ -483,7 +508,7 @@ class AudioPlayerFragment : Fragment(R.layout.fragment_audio_player), AudioPlaye
     private fun updateVolume(distance: Float) {
         val bar = binding.volumeProgressBar
         binding.volumeControls.apply {
-            if (visibility == View.GONE) {
+            if (isGone) {
                 isVisible = true
                 // Volume could be changed using other mediums, sync progress
                 // bar with new value.

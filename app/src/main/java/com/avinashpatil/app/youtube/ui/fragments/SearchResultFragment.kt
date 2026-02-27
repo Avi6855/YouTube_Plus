@@ -16,19 +16,14 @@ import androidx.paging.LoadState
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.databinding.FragmentSearchResultBinding
-import com.avinashpatil.app.youtube.db.DatabaseHelper
-import com.avinashpatil.app.youtube.db.obj.SearchHistoryItem
 import com.avinashpatil.app.youtube.extensions.ceilHalf
-import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.ui.activities.MainActivity
 import com.avinashpatil.app.youtube.ui.adapters.SearchResultsAdapter
 import com.avinashpatil.app.youtube.ui.base.DynamicLayoutManagerFragment
-import com.avinashpatil.app.youtube.ui.extensions.setupFragmentAnimation
+import com.avinashpatil.app.youtube.ui.extensions.setOnBackPressed
 import com.avinashpatil.app.youtube.ui.models.SearchResultViewModel
 import com.avinashpatil.app.youtube.util.TextUtils.toTimeInSeconds
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -39,6 +34,7 @@ class SearchResultFragment : DynamicLayoutManagerFragment(R.layout.fragment_sear
     private val args by navArgs<SearchResultFragmentArgs>()
     private val viewModel by viewModels<SearchResultViewModel>()
 
+    private val mainActivity get() = activity as MainActivity
     private var recyclerViewState: Parcelable? = null
 
     override fun setLayoutManagers(gridItems: Int) {
@@ -51,10 +47,7 @@ class SearchResultFragment : DynamicLayoutManagerFragment(R.layout.fragment_sear
 
         // fixes a bug that the search query will stay the old one when searching for multiple
         // different queries in a row and navigating to the previous ones through back presses
-        (context as MainActivity).setQuerySilent(args.query)
-
-        // add the query to the history
-        addToHistory(args.query)
+        mainActivity.setQuerySilent(args.query)
 
         // filter options
         binding.filterChipGroup.setOnCheckedStateChangeListener { _, _ ->
@@ -83,7 +76,7 @@ class SearchResultFragment : DynamicLayoutManagerFragment(R.layout.fragment_sear
         binding.searchRecycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)
-                recyclerViewState = binding.searchRecycler.layoutManager?.onSaveInstanceState()
+                recyclerViewState = recyclerView.layoutManager?.onSaveInstanceState()
             }
         })
 
@@ -105,19 +98,26 @@ class SearchResultFragment : DynamicLayoutManagerFragment(R.layout.fragment_sear
             }
         }
 
-        setupFragmentAnimation(binding.root) {
+        viewModel.searchSuggestion.observe(viewLifecycleOwner) { suggestion ->
+            binding.searchSuggestionContainer.isVisible = suggestion != null
+            binding.searchSuggestionContainer.setOnClickListener(null)
+            if (suggestion == null) return@observe
+
+            val (suggestion, corrected) = suggestion
+            binding.searchSuggestion.text = suggestion
+            binding.searchSuggestionLabel.text = if (corrected) {
+                getString(R.string.showing_results_for)
+            } else {
+                binding.searchSuggestionContainer.setOnClickListener {
+                    mainActivity.setQuery(suggestion, true)
+                }
+                getString(R.string.did_you_mean)
+            }
+        }
+
+        setOnBackPressed {
             findNavController().popBackStack(R.id.searchFragment, true) ||
                     findNavController().popBackStack()
-        }
-    }
-
-    private fun addToHistory(query: String) {
-        val searchHistoryEnabled =
-            PreferenceHelper.getBoolean(PreferenceKeys.SEARCH_HISTORY_TOGGLE, true)
-        if (searchHistoryEnabled && query.isNotEmpty()) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                DatabaseHelper.addToSearchHistory(SearchHistoryItem(query.trim()))
-            }
         }
     }
 

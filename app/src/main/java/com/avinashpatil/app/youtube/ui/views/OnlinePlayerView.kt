@@ -22,7 +22,6 @@ import com.avinashpatil.app.youtube.enums.PlayerCommand
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
-import com.avinashpatil.app.youtube.helpers.WindowHelper
 import com.avinashpatil.app.youtube.obj.BottomSheetItem
 import com.avinashpatil.app.youtube.services.AbstractPlayerService
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
@@ -52,7 +51,7 @@ class OnlinePlayerView(
     var currentWindow: Window? = null
 
     var selectedResolution: Int? = null
-    private var sponsorBlockAutoSkip = true
+    var sponsorBlockAutoSkip = true
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun getOptionsMenuItems(): List<BottomSheetItem> {
@@ -76,7 +75,7 @@ class OnlinePlayerView(
                         context.getString(R.string.captions),
                         R.drawable.ic_caption,
                         {
-                            playerViewModel?.currentSubtitle?.code
+                            player?.let { PlayerHelper.getCurrentPlayedCaptionFormat(it)?.language }
                                 ?: context.getString(R.string.none)
                         }
                     ) {
@@ -156,7 +155,6 @@ class OnlinePlayerView(
         this.playerOptions = playerOptions
 
         commonPlayerViewModel.isFullscreen.observe(viewLifecycleOwner) { isFullscreen ->
-            WindowHelper.toggleFullscreen(activity.window, isFullscreen)
             updateTopBarMargin()
 
             binding.fullscreen.isInvisible = PlayerHelper.autoFullscreenEnabled
@@ -254,6 +252,7 @@ class OnlinePlayerView(
         if (commonPlayerViewModel?.isFullscreen?.value == true) {
             toggleSystemBars(false)
         }
+
         updateTopBarMargin()
     }
 

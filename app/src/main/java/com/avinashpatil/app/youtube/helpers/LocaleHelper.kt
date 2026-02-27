@@ -1,6 +1,7 @@
 package com.avinashpatil.app.youtube.helpers
 
 import android.content.Context
+import android.os.Build
 import android.telephony.TelephonyManager
 import androidx.core.content.getSystemService
 import androidx.core.os.ConfigurationCompat
@@ -9,23 +10,30 @@ import com.avinashpatil.app.youtube.obj.Country
 import java.util.Locale
 
 object LocaleHelper {
+    @Deprecated("Only used for SDKs below 33 for compatibility")
     fun getAppLocale(): Locale {
         val languageName = PreferenceHelper.getString(PreferenceKeys.LANGUAGE, "sys")
         return when {
             languageName == "sys" -> Locale.getDefault()
-            languageName.contains("-") -> {
-                val languageParts = languageName.split("-")
-                Locale(
-                    languageParts[0],
-                    languageParts[1].replace("r", "")
-                )
-            }
-
-            else -> Locale(languageName)
+            else -> getLocaleFromAndroidCode(languageName)
         }
     }
 
-    private fun getDetectedCountry(context: Context): String {
+    fun isPerAppLocaleSettingSupported(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    }
+
+    fun getLocaleFromAndroidCode(code: String): Locale {
+        val normalizedCode = code.replace("-r", "-")
+        return if (normalizedCode.contains("-")) {
+            val parts = normalizedCode.split("-", limit = 2)
+            Locale(parts[0], parts[1].uppercase())
+        } else {
+            Locale(normalizedCode)
+        }
+    }
+
+    fun getDetectedCountry(context: Context): String {
         return detectSIMCountry(context)
             ?: detectNetworkCountry(context)
             ?: detectLocaleCountry(context)
@@ -56,16 +64,5 @@ object LocaleHelper {
             .distinctBy { it.language }
             .map { Country(it.displayLanguage, it.language) }
             .sortedBy { it.name }
-    }
-
-    fun getTrendingRegion(context: Context): String {
-        val regionPref = PreferenceHelper.getString(PreferenceKeys.REGION, "sys")
-
-        // get the system default country if auto region selected
-        return if (regionPref == "sys") {
-            getDetectedCountry(context).uppercase()
-        } else {
-            regionPref
-        }
     }
 }

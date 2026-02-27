@@ -13,31 +13,37 @@ import androidx.recyclerview.widget.ListAdapter
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.VideoRowBinding
-import com.avinashpatil.app.youtube.db.DatabaseHolder
+import com.avinashpatil.app.youtube.db.DatabaseHelper
 import com.avinashpatil.app.youtube.db.obj.DownloadWithItems
 import com.avinashpatil.app.youtube.extensions.formatAsFileSize
 import com.avinashpatil.app.youtube.helpers.BackgroundHelper
+import com.avinashpatil.app.youtube.helpers.DownloadHelper
 import com.avinashpatil.app.youtube.helpers.ImageHelper
 import com.avinashpatil.app.youtube.helpers.NavigationHelper
 import com.avinashpatil.app.youtube.ui.activities.OfflinePlayerActivity
 import com.avinashpatil.app.youtube.ui.adapters.callbacks.DiffUtilItemCallback
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
 import com.avinashpatil.app.youtube.ui.extensions.setWatchProgressLength
+import com.avinashpatil.app.youtube.ui.fragments.DownloadSortingOrder
 import com.avinashpatil.app.youtube.ui.fragments.DownloadTab
 import com.avinashpatil.app.youtube.ui.sheets.DownloadOptionsBottomSheet
 import com.avinashpatil.app.youtube.ui.sheets.DownloadOptionsBottomSheet.Companion.DELETE_DOWNLOAD_REQUEST_KEY
 import com.avinashpatil.app.youtube.ui.viewholders.DownloadsViewHolder
 import com.avinashpatil.app.youtube.util.TextUtils
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlin.io.path.deleteIfExists
+import kotlinx.coroutines.withContext
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 
 class DownloadsAdapter(
     private val context: Context,
     private val downloadTab: DownloadTab,
+    private val playlistId: String?,
+    private val currentSortOrder: () -> DownloadSortingOrder,
     private val toggleDownload: (DownloadWithItems) -> Boolean
 ) : ListAdapter<DownloadWithItems, DownloadsViewHolder>(DiffUtilItemCallback()) {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DownloadsViewHolder {
@@ -51,8 +57,8 @@ class DownloadsAdapter(
 
     @SuppressLint("SetTextI18n")
     override fun onBindViewHolder(holder: DownloadsViewHolder, position: Int) {
-        val download = getItem(holder.bindingAdapterPosition).download
-        val items = getItem(holder.bindingAdapterPosition).downloadItems
+        val downloadWithItems = getItem(holder.bindingAdapterPosition)
+        val (download, items, _) = downloadWithItems
 
         holder.binding.apply {
             fileSize.isVisible = true
@@ -108,17 +114,30 @@ class DownloadsAdapter(
             }
 
             root.setOnClickListener {
-                if (downloadTab == DownloadTab.VIDEO) {
-                    val intent = Intent(root.context, OfflinePlayerActivity::class.java)
-                    intent.putExtra(IntentData.videoId, download.videoId)
-                    root.context.startActivity(intent)
-                } else {
-                    BackgroundHelper.playOnBackgroundOffline(
-                        root.context,
-                        download.videoId,
-                        downloadTab
-                    )
-                    NavigationHelper.openAudioPlayerFragment(root.context, offlinePlayer = true)
+                when (downloadTab) {
+                    DownloadTab.VIDEO -> {
+                        val intent = Intent(root.context, OfflinePlayerActivity::class.java)
+                            .putExtra(IntentData.videoId, download.videoId)
+                            .putExtra(IntentData.sortOptions, currentSortOrder())
+                        root.context.startActivity(intent)
+                    }
+                    DownloadTab.AUDIO -> {
+                        BackgroundHelper.playOnBackgroundOffline(
+                            root.context,
+                            download.videoId,
+                            playlistId,
+                            downloadTab,
+                            sortOrder = currentSortOrder()
+                        )
+                        NavigationHelper.openAudioPlayerFragment(root.context, offlinePlayer = true)
+                    }
+                    DownloadTab.PLAYLIST -> {
+                        val intent = Intent(root.context, OfflinePlayerActivity::class.java)
+                            .putExtra(IntentData.videoId, download.videoId)
+                            .putExtra(IntentData.playlistId, playlistId)
+                            .putExtra(IntentData.sortOptions, currentSortOrder())
+                        root.context.startActivity(intent)
+                    }
                 }
             }
 
@@ -129,13 +148,17 @@ class DownloadsAdapter(
                     DELETE_DOWNLOAD_REQUEST_KEY,
                     activity
                 ) { _, _ ->
-                    showDeleteDialog(root.context, position)
+                    // the position might have changed in the meanwhile if an other item was deleted
+                    // apparently [onBindViewHolder] is only retriggered if the item changes, but
+                    // not if the position changes (which would lead to IndexOutOfBounds here)
+                    val realPosition = currentList.indexOf(downloadWithItems)
+                    showDeleteDialog(root.context, realPosition)
                 }
                 DownloadOptionsBottomSheet()
                     .apply {
                         arguments = bundleOf(
-                            IntentData.videoId to download.videoId,
-                            IntentData.channelName to download.uploader,
+                            IntentData.streamItem to download.toStreamItem(),
+                            IntentData.playlistId to playlistId,
                             IntentData.downloadTab to downloadTab
                         )
                     }
@@ -156,23 +179,34 @@ class DownloadsAdapter(
             .show()
     }
 
-    fun deleteDownload(position: Int) {
-        val download = getItem(position).download
-        val items = getItem(position).downloadItems
+    private fun deleteDownload(position: Int) {
+        CoroutineScope(Dispatchers.IO).launch {
+            DownloadHelper.deleteDownloadIncludingFiles(getItem(position))
 
-        items.forEach {
-            it.path.deleteIfExists()
+            withContext(Dispatchers.Main) {
+                submitList(currentList.toMutableList().also {
+                    it.removeAt(position)
+                })
+            }
         }
-        runCatching {
-            download.thumbnailPath?.deleteIfExists()
+    }
+
+    fun deleteAllDownloads(onlyDeleteWatched: Boolean) {
+        val (toDelete, toKeep) = currentList.partition {
+            !onlyDeleteWatched || runBlocking(Dispatchers.IO) {
+                DatabaseHelper.isVideoWatched(it.download.videoId, it.download.duration ?: 0)
+            }
         }
 
-        runBlocking(Dispatchers.IO) {
-            DatabaseHolder.Database.downloadDao().deleteDownload(download)
+        CoroutineScope(Dispatchers.IO).launch {
+            for (item in toDelete) {
+                DownloadHelper.deleteDownloadIncludingFiles(item)
+            }
+
+            withContext(Dispatchers.Main) {
+                submitList(toKeep)
+            }
         }
-        submitList(currentList.toMutableList().also {
-            it.removeAt(position)
-        })
     }
 
     fun restoreItem(position: Int) {

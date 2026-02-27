@@ -10,7 +10,6 @@ import com.avinashpatil.app.youtube.helpers.NotificationHelper
 import com.avinashpatil.app.youtube.ui.base.BasePreferenceFragment
 
 class NotificationSettings : BasePreferenceFragment() {
-    override val titleResourceId: Int = R.string.notifications
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.notification_settings, rootKey)

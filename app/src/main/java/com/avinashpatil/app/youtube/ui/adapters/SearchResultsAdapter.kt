@@ -156,9 +156,16 @@ class SearchResultsAdapter(
             }
 
             var subscribed = false
-            binding.searchSubButton.setupSubscriptionButton(item.url.toID(), item.name?.toID()) {
-                subscribed = it
-            }
+            val channelName = item.name ?: ""
+            binding.searchSubButton.setupSubscriptionButton(
+                channelId = item.url.toID(),
+                channelName = channelName,
+                channelAvatar = item.thumbnail,
+                channelVerified = item.verified == true,
+                onIsSubscribedChange = {
+                    subscribed = it
+                }
+            )
 
             root.setOnLongClickListener {
                 val channelOptionsSheet = ChannelOptionsBottomSheet()

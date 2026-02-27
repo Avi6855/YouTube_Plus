@@ -1,7 +1,9 @@
 package com.avinashpatil.app.youtube.ui.preferences
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
+import android.view.LayoutInflater
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.annotation.StringRes
@@ -9,9 +11,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.constants.IntentData
+import com.avinashpatil.app.youtube.constants.PreferenceKeys
+import com.avinashpatil.app.youtube.databinding.DialogImportExportFormatChooserBinding
 import com.avinashpatil.app.youtube.enums.ImportFormat
 import com.avinashpatil.app.youtube.helpers.BackupHelper
 import com.avinashpatil.app.youtube.helpers.ImportHelper
+import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.obj.BackupFile
 import com.avinashpatil.app.youtube.ui.base.BasePreferenceFragment
 import com.avinashpatil.app.youtube.ui.dialogs.BackupDialog
@@ -29,14 +34,12 @@ class BackupRestoreSettings : BasePreferenceFragment() {
     private var backupFile = BackupFile()
     private var importFormat: ImportFormat = ImportFormat.NEWPIPE
 
-    override val titleResourceId: Int = R.string.backup_restore
-
     // backup and restore database
     private val getBackupFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri == null) return@registerForActivityResult
             CoroutineScope(Dispatchers.IO).launch {
-                BackupHelper.restoreAdvancedBackup(requireContext(), uri)
+                BackupHelper.restoreAdvancedBackup(requireContext().applicationContext, uri)
                 withContext(Dispatchers.Main) {
                     // could fail if fragment is already closed
                     runCatching {
@@ -47,8 +50,8 @@ class BackupRestoreSettings : BasePreferenceFragment() {
         }
     private val createBackupFile = registerForActivityResult(CreateDocument(FILETYPE_ANY)) { uri ->
         if (uri == null) return@registerForActivityResult
-        CoroutineScope(Dispatchers.IO).launch {
-            BackupHelper.createAdvancedBackup(requireContext(), uri, backupFile)
+        lifecycleScope.launch(Dispatchers.IO) {
+            BackupHelper.createAdvancedBackup(requireContext().applicationContext, uri, backupFile)
         }
     }
 
@@ -59,17 +62,22 @@ class BackupRestoreSettings : BasePreferenceFragment() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            ImportHelper.importSubscriptions(requireActivity(), uri, importFormat)
+        CoroutineScope(Dispatchers.IO).launch {
+            ImportHelper.importSubscriptions(requireContext().applicationContext as Activity, uri, importFormat)
         }
     }
 
-    private val createSubscriptionsFile = registerForActivityResult(CreateDocument(FILETYPE_ANY)) { uri ->
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            ImportHelper.exportSubscriptions(requireActivity(), uri, importFormat)
+    private val createSubscriptionsFile =
+        registerForActivityResult(CreateDocument(FILETYPE_ANY)) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch(Dispatchers.IO) {
+                ImportHelper.exportSubscriptions(
+                    requireContext().applicationContext as Activity,
+                    uri,
+                    importFormat
+                )
+            }
         }
-    }
 
 
     // result listeners for importing and exporting playlists
@@ -77,7 +85,11 @@ class BackupRestoreSettings : BasePreferenceFragment() {
         registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files ->
             for (file in files) {
                 CoroutineScope(Dispatchers.IO).launch {
-                    ImportHelper.importPlaylists(requireActivity(), file, importFormat)
+                    ImportHelper.importPlaylists(
+                        requireContext().applicationContext as Activity,
+                        file,
+                        importFormat
+                    )
                 }
             }
         }
@@ -86,26 +98,39 @@ class BackupRestoreSettings : BasePreferenceFragment() {
         registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files ->
             for (file in files) {
                 CoroutineScope(Dispatchers.IO).launch {
-                    ImportHelper.importWatchHistory(requireActivity(), file, importFormat)
+                    ImportHelper.importWatchHistory(
+                        requireContext().applicationContext,
+                        file,
+                        importFormat
+                    )
                 }
             }
         }
 
-    private val createPlaylistsFile = registerForActivityResult(CreateDocument(FILETYPE_ANY)) { uri ->
-        uri?.let {
-            lifecycleScope.launch(Dispatchers.IO) {
-                ImportHelper.exportPlaylists(requireActivity(), uri, importFormat)
+    private val createPlaylistsFile =
+        registerForActivityResult(CreateDocument(FILETYPE_ANY)) { uri ->
+            uri?.let {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    ImportHelper.exportPlaylists(
+                        requireContext().applicationContext as Activity,
+                        uri,
+                        importFormat
+                    )
+                }
             }
         }
-    }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.import_export_settings, rootKey)
 
         val importSubscriptions = findPreference<Preference>("import_subscriptions")
         importSubscriptions?.setOnPreferenceClickListener {
-            createImportFormatDialog(requireContext(), R.string.import_subscriptions_from, importSubscriptionFormatList) {
-                importFormat = it
+            createImportFormatDialog(
+                requireContext(),
+                R.string.import_subscriptions_from,
+                importSubscriptionFormatList
+            ) { format, _ ->
+                importFormat = format
                 getSubscriptionsFile.launch("*/*")
             }
             true
@@ -113,10 +138,15 @@ class BackupRestoreSettings : BasePreferenceFragment() {
 
         val exportSubscriptions = findPreference<Preference>("export_subscriptions")
         exportSubscriptions?.setOnPreferenceClickListener {
-            createImportFormatDialog(requireContext(), R.string.export_subscriptions_to, exportSubscriptionFormatList) {
-                importFormat = it
+            createImportFormatDialog(
+                requireContext(),
+                R.string.export_subscriptions_to,
+                exportSubscriptionFormatList,
+                isExport = true
+            ) { format, includeTimestamp ->
+                importFormat = format
                 createSubscriptionsFile.launch(
-                    "${getString(importFormat.value).lowercase()}-subscriptions.${importFormat.fileExtension}"
+                    getExportFileName(requireContext(), format, "subscriptions", includeTimestamp)
                 )
             }
             true
@@ -124,8 +154,12 @@ class BackupRestoreSettings : BasePreferenceFragment() {
 
         val importPlaylists = findPreference<Preference>("import_playlists")
         importPlaylists?.setOnPreferenceClickListener {
-            createImportFormatDialog(requireContext(), R.string.import_playlists_from, importPlaylistFormatList) {
-                importFormat = it
+            createImportFormatDialog(
+                requireContext(),
+                R.string.import_playlists_from,
+                importPlaylistFormatList
+            ) { format, _ ->
+                importFormat = format
                 getPlaylistsFile.launch(arrayOf("*/*"))
             }
             true
@@ -133,10 +167,15 @@ class BackupRestoreSettings : BasePreferenceFragment() {
 
         val exportPlaylists = findPreference<Preference>("export_playlists")
         exportPlaylists?.setOnPreferenceClickListener {
-            createImportFormatDialog(requireContext(), R.string.export_playlists_to, exportPlaylistFormatList) {
-                importFormat = it
+            createImportFormatDialog(
+                requireContext(),
+                R.string.export_playlists_to,
+                exportPlaylistFormatList,
+                isExport = true
+            ) { format, includeTimestamp ->
+                importFormat = format
                 createPlaylistsFile.launch(
-                    "${getString(importFormat.value).lowercase()}-playlists.${importFormat.fileExtension}"
+                    getExportFileName(requireContext(), format, "playlists", includeTimestamp)
                 )
             }
             true
@@ -144,8 +183,12 @@ class BackupRestoreSettings : BasePreferenceFragment() {
 
         val importWatchHistory = findPreference<Preference>("import_watch_history")
         importWatchHistory?.setOnPreferenceClickListener {
-            createImportFormatDialog(requireContext(), R.string.import_watch_history, importWatchHistoryFormatList) {
-                importFormat = it
+            createImportFormatDialog(
+                requireContext(),
+                R.string.import_watch_history,
+                importWatchHistoryFormatList
+            ) { format, _ ->
+                importFormat = format
                 getWatchHistoryFile.launch(arrayOf("*/*"))
             }
             true
@@ -206,19 +249,56 @@ class BackupRestoreSettings : BasePreferenceFragment() {
             context: Context,
             @StringRes titleStringId: Int,
             formats: List<ImportFormat>,
-            onConfirm: (ImportFormat) -> Unit
+            isExport: Boolean = false,
+            onConfirm: (ImportFormat, Boolean) -> Unit
         ) {
             var selectedIndex = 0
-            MaterialAlertDialogBuilder(context)
+
+            val dialog = MaterialAlertDialogBuilder(context)
                 .setTitle(context.getString(titleStringId))
-                .setSingleChoiceItems(formats.map { context.getString(it.value) }.toTypedArray(), selectedIndex) { _, i ->
+                .setSingleChoiceItems(
+                    formats.map { context.getString(it.value) }.toTypedArray(),
+                    selectedIndex
+                ) { _, i ->
                     selectedIndex = i
                 }
-                .setPositiveButton(
-                    R.string.okay
-                ) { _, _ -> onConfirm(formats[selectedIndex]) }
+
+            val layoutInflater = LayoutInflater.from(context)
+            val binding = DialogImportExportFormatChooserBinding.inflate(layoutInflater)
+            binding.includeTimestamp.isChecked = PreferenceHelper.getBoolean(
+                PreferenceKeys.INCLUDE_TIMESTAMP_IN_BACKUP_FILENAME,
+                false
+            )
+            if (isExport) {
+                dialog.setView(binding.root)
+            }
+
+            dialog.setPositiveButton(R.string.okay) { _, _ ->
+                if (isExport) PreferenceHelper.putBoolean(
+                    PreferenceKeys.INCLUDE_TIMESTAMP_IN_BACKUP_FILENAME,
+                    binding.includeTimestamp.isChecked
+                )
+
+                onConfirm(formats[selectedIndex], binding.includeTimestamp.isChecked)
+            }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
+        }
+
+        fun getExportFileName(
+            context: Context,
+            format: ImportFormat,
+            type: String,
+            includeTimestamp: Boolean
+        ): String {
+            var baseString = context.getString(format.value).lowercase()
+            baseString += "-${type}"
+
+            if (includeTimestamp) {
+                baseString += "-${TextUtils.getFileSafeTimeStampNow()}"
+            }
+
+            return "${baseString}.${format.fileExtension}"
         }
     }
 }

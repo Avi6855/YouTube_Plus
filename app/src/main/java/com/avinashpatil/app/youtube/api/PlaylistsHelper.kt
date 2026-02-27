@@ -8,10 +8,9 @@ import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.enums.PlaylistType
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.obj.PipedImportPlaylist
-import com.avinashpatil.app.youtube.receivers.repo.LocalPlaylistsRepository
-import com.avinashpatil.app.youtube.receivers.repo.PipedPlaylistRepository
-import com.avinashpatil.app.youtube.receivers.repo.PlaylistRepository
-import com.avinashpatil.app.youtube.util.deArrow
+import com.avinashpatil.app.youtube.repo.LocalPlaylistsRepository
+import com.avinashpatil.app.youtube.repo.PipedPlaylistRepository
+import com.avinashpatil.app.youtube.repo.PlaylistRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -51,11 +50,9 @@ object PlaylistsHelper {
 
     suspend fun getPlaylist(playlistId: String): Playlist {
         // load locally stored playlists with the auth api
-        return when (getPrivatePlaylistType(playlistId)) {
-            PlaylistType.PUBLIC -> RetrofitInstance.api.getPlaylist(playlistId)
+        return when (getPlaylistType(playlistId)) {
+            PlaylistType.PUBLIC -> MediaServiceRepository.instance.getPlaylist(playlistId)
             else -> playlistsRepository.getPlaylist(playlistId)
-        }.apply {
-            relatedStreams = relatedStreams.deArrow()
         }
     }
 
@@ -71,7 +68,9 @@ object PlaylistsHelper {
         playlistsRepository.createPlaylist(playlistName)
 
     suspend fun addToPlaylist(playlistId: String, vararg videos: StreamItem) =
-        playlistsRepository.addToPlaylist(playlistId, *videos)
+        withContext(Dispatchers.IO) {
+            playlistsRepository.addToPlaylist(playlistId, *videos)
+        }
 
     suspend fun renamePlaylist(playlistId: String, newName: String) =
         playlistsRepository.renamePlaylist(playlistId, newName)
@@ -92,7 +91,7 @@ object PlaylistsHelper {
         return if (loggedIn) PlaylistType.PRIVATE else PlaylistType.LOCAL
     }
 
-    private fun getPrivatePlaylistType(playlistId: String): PlaylistType {
+    fun getPlaylistType(playlistId: String): PlaylistType {
         return if (playlistId.isDigitsOnly()) {
             PlaylistType.LOCAL
         } else if (playlistId.matches(pipedPlaylistRegex)) {

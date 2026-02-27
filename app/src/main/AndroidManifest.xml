@@ -32,7 +32,8 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/StartupTheme"
+        android:theme="@style/BaseTheme"
+        android:memtagMode="async"
         tools:targetApi="tiramisu">
 
         <activity
@@ -114,14 +115,14 @@
 
         <activity
             android:name=".ui.activities.OfflinePlayerActivity"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:configChanges="keyboard|keyboardHidden|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
             android:launchMode="singleTop"
             android:label="@string/player"
             android:supportsPictureInPicture="true" />
 
         <activity
             android:name=".ui.activities.MainActivity"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:configChanges="keyboard|keyboardHidden|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="locked"
@@ -136,7 +137,7 @@
 
         <activity-alias
             android:name=".Default"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:configChanges="keyboard|keyboardHidden|screenSize|smallestScreenSize|screenLayout|orientation|uiMode"
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
@@ -372,18 +373,8 @@
                 <data android:scheme="https" />
                 <data android:pathPrefix="/" />
 
-                <data android:host="piped.adminforge.de" />
-                <data android:host="piped.astartes.nl" />
-                <data android:host="piped.coldforge.xyz" />
                 <data android:host="piped.drgns.space" />
-                <data android:host="piped.ducks.party" />
-                <data android:host="piped.lunar.icu" />
-                <data android:host="piped.ngn.tf" />
-                <data android:host="piped.projectsegfau.lt" />
-                <data android:host="piped.r4fo.com" />
-                <data android:host="piped.smnz.de" />
                 <data android:host="piped.syncpundit.io" />
-                <data android:host="piped.us.projectsegfau.lt" />
                 <data android:host="piped.video" />
             </intent-filter>
         </activity>
@@ -414,30 +405,6 @@
 
         <service
             android:name=".services.OfflinePlayerService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback">
-
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService"/>
-            </intent-filter>
-
-        </service>
-
-        <service
-            android:name=".services.VideoOnlinePlayerService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback">
-
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService"/>
-            </intent-filter>
-
-        </service>
-
-        <service
-            android:name=".services.VideoOfflinePlayerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback">

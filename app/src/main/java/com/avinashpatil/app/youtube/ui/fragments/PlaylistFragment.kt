@@ -11,15 +11,17 @@ import androidx.core.os.bundleOf
 import androidx.core.text.parseAsHtml
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
+import androidx.core.view.setPadding
 import androidx.core.view.updatePadding
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.avinashpatil.app.youtube.R
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.api.obj.Playlist
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.constants.IntentData
@@ -31,6 +33,7 @@ import com.avinashpatil.app.youtube.extensions.TAG
 import com.avinashpatil.app.youtube.extensions.ceilHalf
 import com.avinashpatil.app.youtube.extensions.dpToPx
 import com.avinashpatil.app.youtube.extensions.setOnDismissListener
+import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
 import com.avinashpatil.app.youtube.helpers.ImageHelper
 import com.avinashpatil.app.youtube.helpers.NavigationHelper
@@ -39,7 +42,6 @@ import com.avinashpatil.app.youtube.ui.adapters.PlaylistAdapter
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
 import com.avinashpatil.app.youtube.ui.base.DynamicLayoutManagerFragment
 import com.avinashpatil.app.youtube.ui.extensions.addOnBottomReachedListener
-import com.avinashpatil.app.youtube.ui.extensions.setupFragmentAnimation
 import com.avinashpatil.app.youtube.ui.models.CommonPlayerViewModel
 import com.avinashpatil.app.youtube.ui.sheets.BaseBottomSheet
 import com.avinashpatil.app.youtube.ui.sheets.PlaylistOptionsBottomSheet
@@ -105,13 +107,11 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
         binding.playlistRecView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)
-                recyclerViewState = binding.playlistRecView.layoutManager?.onSaveInstanceState()
+                recyclerViewState = recyclerView.layoutManager?.onSaveInstanceState()
             }
         })
 
         fetchPlaylist()
-
-        setupFragmentAnimation(binding.root)
     }
 
     override fun onDestroyView() {
@@ -142,8 +142,13 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
             playlistName = response.name
             isLoading = false
 
-            if (!response.thumbnailUrl.isNullOrEmpty())
+            if (!response.thumbnailUrl.isNullOrEmpty()) {
                 ImageHelper.loadImage(response.thumbnailUrl, binding.thumbnail)
+            } else {
+                binding.thumbnail.setImageResource(R.drawable.ic_empty_playlist)
+                binding.thumbnail.setPadding(64f.dpToPx())
+                binding.thumbnail.setBackgroundColor(com.google.android.material.R.attr.colorSurface)
+            }
             binding.playlistProgress.isGone = true
             binding.playlistAppBar.isVisible = true
             binding.playlistRecView.isVisible = true
@@ -192,7 +197,7 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
                     }
 
                     if (isPlaylistToBeDeleted) {
-                        // TODO move back: navController().popBackStack() crashes
+                        findNavController().popBackStack()
                         return@setFragmentResultListener
                     }
                 }
@@ -205,17 +210,7 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
                 binding.playAll.isGone = true
             } else {
                 binding.playAll.setOnClickListener {
-                    if (playlistFeed.isEmpty()) return@setOnClickListener
-
-                    val sortedStreams = getSortedVideos()
-                    PlayingQueue.setStreams(sortedStreams)
-
-                    NavigationHelper.navigateVideo(
-                        requireContext(),
-                        sortedStreams.first().url,
-                        playlistId,
-                        keepQueue = true
-                    )
+                    startVideoItemPlayback(getSortedVideos().first())
                 }
             }
 
@@ -242,7 +237,8 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
                     binding.bookmark.text = getString(R.string.shuffle)
                     binding.bookmark.setOnClickListener {
                         val queue = playlistFeed.shuffled()
-                        PlayingQueue.add(*queue.toTypedArray())
+                        PlayingQueue.setStreams(queue)
+
                         NavigationHelper.navigateVideo(
                             requireContext(),
                             queue.firstOrNull()?.url,
@@ -253,26 +249,40 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
                 }
 
                 if (playlistFeed.isEmpty()) {
-                    binding.sortContainer.isGone = true
+                    binding.sortBTN.isGone = true
                 } else {
-                    binding.sortContainer.isVisible = true
-                    binding.sortContainer.setOnClickListener {
+                    binding.sortBTN.isVisible = true
+                    binding.sortBTN.setOnClickListener {
                         BaseBottomSheet().apply {
                             setSimpleItems(sortOptions.toList()) { index ->
                                 selectedSortOrder = index
-                                binding.sortTV.text = sortOptions[index]
+                                binding.sortBTN.text = sortOptions[index]
                                 showPlaylistVideos(response)
                             }
                         }.show(childFragmentManager)
                     }
                 }
 
-                binding.sortTV.text = sortOptions[selectedSortOrder]
+                binding.sortBTN.text = sortOptions[selectedSortOrder]
 
             }
 
             updatePlaylistBookmark(response)
         }
+    }
+
+    private fun startVideoItemPlayback(streamItem: StreamItem) {
+        if (playlistFeed.isEmpty()) return
+
+        val sortedStreams = getSortedVideos()
+        PlayingQueue.setStreams(sortedStreams)
+
+        NavigationHelper.navigateVideo(
+            requireContext(),
+            streamItem.url?.toID(),
+            playlistId = playlistId,
+            keepQueue = true
+        )
     }
 
     /**
@@ -323,7 +333,9 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
             videos.toMutableList(),
             playlistId,
             playlistType
-        )
+        ) { streamItem ->
+            startVideoItemPlayback(streamItem)
+        }
         // TODO make sure the adapter is set once in onViewCreated
         binding.playlistRecView.adapter = playlistAdapter
 
@@ -382,11 +394,7 @@ class PlaylistFragment : DynamicLayoutManagerFragment(R.layout.fragment_playlist
             val response = try {
                 withContext(Dispatchers.IO) {
                     // load locally stored playlists with the auth api
-                    if (playlistType == PlaylistType.PRIVATE) {
-                        RetrofitInstance.authApi.getPlaylistNextPage(playlistId, nextPage!!)
-                    } else {
-                        RetrofitInstance.api.getPlaylistNextPage(playlistId, nextPage!!)
-                    }
+                    MediaServiceRepository.instance.getPlaylistNextPage(playlistId, nextPage!!)
                 }
             } catch (e: Exception) {
                 context?.toastFromMainDispatcher(e.localizedMessage.orEmpty())

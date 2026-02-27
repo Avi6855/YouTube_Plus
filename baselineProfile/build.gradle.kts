@@ -1,35 +1,34 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.androidTest)
-    alias(libs.plugins.jetbrainsKotlinAndroid)
     alias(libs.plugins.baselineprofile)
 }
 
 android {
     namespace = "com.avinashpatil.app.youtube.baselineprofile"
-    compileSdk = 34
+    compileSdk = 36
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+        }
     }
 
     defaultConfig {
         minSdk = 28
-        targetSdk = 34
-
+        targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     targetProjectPath = ":app"
-
 }
 
-// This is the configuration block for the Baseline Profile plugin.
-// You can specify to run the generators on a managed devices or connected devices.
 baselineProfile {
     useConnectedDevices = true
 }

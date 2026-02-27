@@ -1,18 +1,18 @@
 package com.avinashpatil.app.youtube.api
 
-import android.content.Context
-import com.avinashpatil.app.youtube.R
+import com.avinashpatil.app.youtube.api.obj.Subscription
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
+import com.avinashpatil.app.youtube.db.obj.SubscriptionsFeedItem
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
-import com.avinashpatil.app.youtube.receivers.repo.AccountSubscriptionsRepository
-import com.avinashpatil.app.youtube.receivers.repo.FeedRepository
-import com.avinashpatil.app.youtube.receivers.repo.LocalFeedRepository
-import com.avinashpatil.app.youtube.receivers.repo.LocalSubscriptionsRepository
-import com.avinashpatil.app.youtube.receivers.repo.PipedAccountFeedRepository
-import com.avinashpatil.app.youtube.receivers.repo.PipedNoAccountFeedRepository
-import com.avinashpatil.app.youtube.receivers.repo.SubscriptionsRepository
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import kotlinx.coroutines.runBlocking
+import com.avinashpatil.app.youtube.repo.AccountSubscriptionsRepository
+import com.avinashpatil.app.youtube.repo.FeedProgress
+import com.avinashpatil.app.youtube.repo.FeedRepository
+import com.avinashpatil.app.youtube.repo.LocalFeedRepository
+import com.avinashpatil.app.youtube.repo.LocalSubscriptionsRepository
+import com.avinashpatil.app.youtube.repo.PipedAccountFeedRepository
+import com.avinashpatil.app.youtube.repo.PipedLocalSubscriptionsRepository
+import com.avinashpatil.app.youtube.repo.PipedNoAccountFeedRepository
+import com.avinashpatil.app.youtube.repo.SubscriptionsRepository
 
 object SubscriptionHelper {
     /**
@@ -21,51 +21,48 @@ object SubscriptionHelper {
      */
     const val GET_SUBSCRIPTIONS_LIMIT = 100
 
+    private val localFeedExtraction
+        get() = PreferenceHelper.getBoolean(
+            PreferenceKeys.LOCAL_FEED_EXTRACTION,
+            false
+        )
     private val token get() = PreferenceHelper.getToken()
     private val subscriptionsRepository: SubscriptionsRepository
         get() = when {
-        token.isNotEmpty() -> AccountSubscriptionsRepository()
-        else -> LocalSubscriptionsRepository()
-    }
+            token.isNotEmpty() -> AccountSubscriptionsRepository()
+            localFeedExtraction -> LocalSubscriptionsRepository()
+            else -> PipedLocalSubscriptionsRepository()
+        }
     private val feedRepository: FeedRepository
         get() = when {
-        PreferenceHelper.getBoolean(PreferenceKeys.LOCAL_FEED_EXTRACTION, false) -> LocalFeedRepository()
-        token.isNotEmpty() -> PipedAccountFeedRepository()
-        else -> PipedNoAccountFeedRepository()
-    }
-
-    suspend fun subscribe(channelId: String) = subscriptionsRepository.subscribe(channelId)
-    suspend fun unsubscribe(channelId: String) = subscriptionsRepository.unsubscribe(channelId)
-    suspend fun isSubscribed(channelId: String) = subscriptionsRepository.isSubscribed(channelId)
-    suspend fun importSubscriptions(newChannels: List<String>) = subscriptionsRepository.importSubscriptions(newChannels)
-    suspend fun getSubscriptions() = subscriptionsRepository.getSubscriptions()
-    suspend fun getSubscriptionChannelIds() = subscriptionsRepository.getSubscriptionChannelIds()
-    suspend fun getFeed(forceRefresh: Boolean) = feedRepository.getFeed(forceRefresh)
-
-    fun handleUnsubscribe(
-        context: Context,
-        channelId: String,
-        channelName: String?,
-        onUnsubscribe: () -> Unit
-    ) {
-        if (!PreferenceHelper.getBoolean(PreferenceKeys.CONFIRM_UNSUBSCRIBE, false)) {
-            runBlocking {
-                unsubscribe(channelId)
-                onUnsubscribe()
-            }
-            return
+            localFeedExtraction -> LocalFeedRepository()
+            token.isNotEmpty() -> PipedAccountFeedRepository()
+            else -> PipedNoAccountFeedRepository()
         }
 
-        MaterialAlertDialogBuilder(context)
-            .setTitle(R.string.unsubscribe)
-            .setMessage(context.getString(R.string.confirm_unsubscribe, channelName))
-            .setPositiveButton(R.string.unsubscribe) { _, _ ->
-                runBlocking {
-                    unsubscribe(channelId)
-                    onUnsubscribe()
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+    suspend fun subscribe(
+        channelId: String, name: String, uploaderAvatar: String?, verified: Boolean
+    ) = subscriptionsRepository.subscribe(channelId, name, uploaderAvatar, verified)
+
+    suspend fun unsubscribe(channelId: String) {
+        subscriptionsRepository.unsubscribe(channelId)
+        // remove videos from (local) feed
+        feedRepository.removeChannel(channelId)
     }
+    suspend fun isSubscribed(channelId: String) = subscriptionsRepository.isSubscribed(channelId)
+    suspend fun importSubscriptions(newChannels: List<String>) =
+        subscriptionsRepository.importSubscriptions(newChannels)
+
+    suspend fun getSubscriptions() =
+        subscriptionsRepository.getSubscriptions().sortedBy { it.name.lowercase() }
+
+    suspend fun getSubscriptionChannelIds() = subscriptionsRepository.getSubscriptionChannelIds()
+    suspend fun getFeed(forceRefresh: Boolean, onProgressUpdate: (FeedProgress) -> Unit = {}) =
+        feedRepository.getFeed(forceRefresh, onProgressUpdate)
+
+    suspend fun submitFeedItemChange(feedItem: SubscriptionsFeedItem) =
+        feedRepository.submitFeedItemChange(feedItem)
+
+    suspend fun submitSubscriptionChannelInfosChanged(subscriptions: List<Subscription>) =
+        subscriptionsRepository.submitSubscriptionChannelInfosChanged(subscriptions)
 }

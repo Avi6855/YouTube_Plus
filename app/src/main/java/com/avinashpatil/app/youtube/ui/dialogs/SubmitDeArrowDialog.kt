@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
 import com.avinashpatil.app.youtube.R
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.api.obj.DeArrowBody
 import com.avinashpatil.app.youtube.api.obj.DeArrowSubmitThumbnail
@@ -71,8 +72,8 @@ class SubmitDeArrowDialog: DialogFragment() {
     private suspend fun fetchDeArrowData() {
         val data = try {
             withContext(Dispatchers.IO) {
-                RetrofitInstance.api.getDeArrowContent(videoId)
-            }.getOrElse(videoId) { return }
+                MediaServiceRepository.instance.getDeArrowContent(videoId)
+            } ?: return
         } catch (e: Exception) {
             return
         }
@@ -86,7 +87,7 @@ class SubmitDeArrowDialog: DialogFragment() {
 
         val userID = PreferenceHelper.getSponsorBlockUserID()
         val userAgent = TextUtils.getUserAgent(context)
-        val title = binding.dearrowTitle.text
+        val title = binding.dearrowTitle.selectedItem
             .takeIf { it.isNotEmpty() && binding.titleCheckbox.isChecked }
             ?.let { DeArrowSubmitTitle(it) }
         val thumbnail = binding.thumbnailTime.text.toString().parseDurationString()

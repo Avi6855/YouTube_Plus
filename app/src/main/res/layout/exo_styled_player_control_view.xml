@@ -3,12 +3,6 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <View
-        android:id="@id/exo_controls_background"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@color/exo_black_opacity_60" />
-
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
@@ -135,7 +129,14 @@
         android:layout_gravity="center"
         android:background="@android:color/transparent"
         android:gravity="center"
-        android:padding="20dp">
+        android:padding="20dp"
+        android:layoutDirection="ltr">
+
+        <include
+            android:id="@+id/seek_button_rewind"
+            layout="@layout/seek_button_rewind"
+            android:visibility="invisible"
+            tools:visibility="visible" />
 
         <ImageView
             android:id="@+id/skip_prev"
@@ -145,32 +146,6 @@
             android:visibility="invisible"
             app:tint="@android:color/white" />
 
-        <FrameLayout
-            android:id="@+id/rewindBTN"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginHorizontal="10dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:scaleX="0.8"
-            android:scaleY="0.8"
-            android:visibility="gone">
-
-            <ImageView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:src="@drawable/ic_rewind"
-                app:tint="@android:color/white" />
-
-            <TextView
-                android:id="@+id/rewindTV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:textColor="@android:color/white" />
-
-        </FrameLayout>
-
         <ImageButton
             android:id="@+id/playPauseBTN"
             style="@style/ExoStyledControls.Button.Center.PlayPause"
@@ -179,32 +154,6 @@
             android:src="@drawable/ic_play"
             app:tint="@android:color/white" />
 
-        <FrameLayout
-            android:id="@+id/forwardBTN"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginHorizontal="10dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:scaleX="0.8"
-            android:scaleY="0.8"
-            android:visibility="gone">
-
-            <ImageView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:src="@drawable/ic_forward"
-                app:tint="@android:color/white" />
-
-            <TextView
-                android:id="@+id/forwardTV"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:textColor="@android:color/white" />
-
-        </FrameLayout>
-
         <ImageView
             android:id="@+id/skip_next"
             style="@style/PlayerControlCenter"
@@ -212,6 +161,12 @@
             android:src="@drawable/ic_next"
             android:visibility="invisible"
             app:tint="@android:color/white" />
+
+        <include
+            android:id="@+id/seek_button_forward"
+            layout="@layout/seek_button_forward"
+            android:visibility="invisible"
+            tools:visibility="visible" />
 
     </LinearLayout>
 
@@ -239,6 +194,16 @@
                 android:adjustViewBounds="true"
                 android:scaleType="fitCenter"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Small" />
+
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/previewProgressIndicator"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="?shapeCornerSizeSmall"
+                android:layout_gravity="bottom"
+                android:indeterminate="true"
+                android:visibility="invisible"
+                app:trackThickness="2.5dp" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="wrap_content"
@@ -349,7 +314,7 @@
             android:layout_marginHorizontal="10dp"
             android:translationZ="10dp">
 
-            <com.avinashpatil.app.youtube.ui.views.MarkableTimeBar
+            <com.avinashpatil.app.youtube.ui.views.ChapterTimeBar
                 android:id="@+id/exo_progress"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

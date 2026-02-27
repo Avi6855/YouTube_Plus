@@ -13,6 +13,7 @@ import com.avinashpatil.app.youtube.enums.PlaylistType
 import com.avinashpatil.app.youtube.extensions.getWhileDigit
 import com.avinashpatil.app.youtube.extensions.serializable
 import com.avinashpatil.app.youtube.helpers.LocaleHelper
+import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.services.PlaylistDownloadEnqueueService
 import com.avinashpatil.app.youtube.util.TextUtils
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -22,11 +23,14 @@ class DownloadPlaylistDialog : DialogFragment() {
     private lateinit var playlistName: String
     private lateinit var playlistType: PlaylistType
 
+    private val availableLanguages = LocaleHelper.getAvailableLocales()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         playlistId = requireArguments().getString(IntentData.playlistId)!!
-        playlistName = requireArguments().getString(IntentData.playlistName) ?: TextUtils.getFileSafeTimeStampNow()
+        playlistName = requireArguments().getString(IntentData.playlistName)
+            ?: TextUtils.getFileSafeTimeStampNow()
         playlistType = requireArguments().serializable(IntentData.playlistType)!!
     }
 
@@ -38,8 +42,9 @@ class DownloadPlaylistDialog : DialogFragment() {
             it.subList(1, it.size)
         }
         val possibleAudioQualities = resources.getStringArray(R.array.audioQualityBitrates)
-        val availableLanguages = LocaleHelper.getAvailableLocales()
+            .toList()
 
+        binding.playlistTitle.text = playlistName
         binding.videoSpinner.items = listOf(getString(R.string.no_video)) + possibleVideoQualities
         binding.audioSpinner.items = listOf(getString(R.string.no_audio)) + possibleAudioQualities
         binding.subtitleSpinner.items =
@@ -47,36 +52,21 @@ class DownloadPlaylistDialog : DialogFragment() {
         binding.audioLanguageSpinner.items =
             listOf(getString(R.string.default_language)) + availableLanguages.map { it.name }
 
+        restoreSelections(binding)
+
         return MaterialAlertDialogBuilder(requireContext())
-            .setTitle(getString(R.string.download_playlist) + ": " + playlistName)
+            .setTitle(getString(R.string.download_playlist))
             .setView(binding.root)
             .setPositiveButton(R.string.download) { _, _ ->
                 with(binding) {
-                    val maxVideoQuality = if (videoSpinner.selectedItemPosition >= 1) {
-                        possibleVideoQualities[videoSpinner.selectedItemPosition - 1]
-                            .getWhileDigit()
-                    } else {
-                        null
-                    }
+                    val maxVideoQuality = possibleVideoQualities.getOrNull(videoSpinner.selectedItemPosition - 1)
+                        .getWhileDigit()
+                    val maxAudioQuality = possibleAudioQualities.getOrNull(audioSpinner.selectedItemPosition - 1)
+                        .getWhileDigit()
+                    val captionLanguage = availableLanguages.getOrNull(subtitleSpinner.selectedItemPosition - 1)?.code
+                    val audioLanguage = availableLanguages.getOrNull(audioLanguageSpinner.selectedItemPosition - 1)?.code
 
-                    val maxAudioQuality = if (audioSpinner.selectedItemPosition >= 1) {
-                        possibleAudioQualities[audioSpinner.selectedItemPosition - 1]
-                            .getWhileDigit()
-                    } else {
-                        null
-                    }
-
-                    val captionLanguage = if (subtitleSpinner.selectedItemPosition >= 1) {
-                        availableLanguages[subtitleSpinner.selectedItemPosition - 1].code
-                    } else {
-                        null
-                    }
-
-                    val audioLanguage = if (audioLanguageSpinner.selectedItemPosition >= 1) {
-                        availableLanguages[audioLanguageSpinner.selectedItemPosition - 1].code
-                    } else {
-                        null
-                    }
+                    saveSelections(binding)
 
                     if (maxVideoQuality == null && maxAudioQuality == null) {
                         Toast.makeText(context, R.string.nothing_selected, Toast.LENGTH_SHORT)
@@ -99,5 +89,43 @@ class DownloadPlaylistDialog : DialogFragment() {
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun saveSelections(binding: DialogDownloadPlaylistBinding) {
+        binding.audioSpinner.getSelectionIfNotFirst().let { item ->
+            PreferenceHelper.putString(PLAYLIST_DOWNLOAD_AUDIO_QUALITY, item.orEmpty())
+        }
+        binding.videoSpinner.getSelectionIfNotFirst().let { item ->
+            PreferenceHelper.putString(PLAYLIST_DOWNLOAD_VIDEO_QUALITY, item.orEmpty())
+        }
+        binding.audioLanguageSpinner.selectedItemPosition.let { index ->
+            val language = availableLanguages.getOrNull(index - 1)
+            PreferenceHelper.putString(PLAYLIST_DOWNLOAD_AUDIO_LANGUAGE, language?.code.orEmpty())
+        }
+        binding.subtitleSpinner.selectedItemPosition.let { index ->
+            val language = availableLanguages.getOrNull(index - 1)
+            PreferenceHelper.putString(PLAYLIST_DOWNLOAD_CAPTION_LANGUAGE, language?.code.orEmpty())
+        }
+    }
+
+    private fun restoreSelections(binding: DialogDownloadPlaylistBinding) {
+        val videoQuality = PreferenceHelper.getString(PLAYLIST_DOWNLOAD_VIDEO_QUALITY, "")
+        binding.videoSpinner.setSelection(videoQuality)
+
+        val audioQuality = PreferenceHelper.getString(PLAYLIST_DOWNLOAD_AUDIO_QUALITY, "")
+        binding.audioSpinner.setSelection(audioQuality)
+
+        val audioLanguage = PreferenceHelper.getString(PLAYLIST_DOWNLOAD_AUDIO_LANGUAGE, "")
+        binding.audioLanguageSpinner.setSelection(audioLanguage)
+
+        val captionLanguage = PreferenceHelper.getString(PLAYLIST_DOWNLOAD_CAPTION_LANGUAGE, "")
+        binding.subtitleSpinner.setSelection(captionLanguage)
+    }
+
+    companion object {
+        private const val PLAYLIST_DOWNLOAD_VIDEO_QUALITY = "playlist_download_video_quality"
+        private const val PLAYLIST_DOWNLOAD_AUDIO_QUALITY = "playlist_download_audio_quality"
+        private const val PLAYLIST_DOWNLOAD_AUDIO_LANGUAGE = "playlist_download_audio_language"
+        private const val PLAYLIST_DOWNLOAD_CAPTION_LANGUAGE = "playlist_download_caption_language"
     }
 }

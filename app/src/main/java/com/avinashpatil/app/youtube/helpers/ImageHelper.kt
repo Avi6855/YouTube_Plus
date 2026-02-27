@@ -3,14 +3,13 @@ package com.avinashpatil.app.youtube.helpers
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.widget.ImageView
 import androidx.core.net.toUri
 import coil3.ImageLoader
-import coil3.asDrawable
 import coil3.disk.DiskCache
 import coil3.disk.directory
+import coil3.load
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
@@ -31,6 +30,7 @@ object ImageHelper {
     private lateinit var imageLoader: ImageLoader
 
     private val Context.coilFile get() = cacheDir.resolve("coil")
+    private const val HTTP_SCHEME = "http"
 
     /**
      * Initialize the image loader
@@ -80,21 +80,39 @@ object ImageHelper {
     }
 
     /**
+     * Checks if the corresponding image for the given key (e.g. a url) is cached.
+     */
+    private fun isCached(key: String): Boolean {
+        val cacheSnapshot = imageLoader.diskCache?.openSnapshot(key)
+        val isCacheHit = cacheSnapshot?.data?.toFile()?.exists()
+        cacheSnapshot?.close()
+
+        return isCacheHit ?: false
+    }
+
+    /**
      * load an image from a url into an imageView
      */
     fun loadImage(url: String?, target: ImageView, whiteBackground: Boolean = false) {
+        if (url.isNullOrEmpty()) return
+
         // clear image to avoid loading issues at fast scrolling
         target.setImageBitmap(null)
 
-        // only load the image if the data saver mode is disabled
-        if (DataSaverMode.isEnabled(target.context) || url.isNullOrEmpty()) return
         val urlToLoad = ProxyHelper.rewriteUrlUsingProxyPreference(url)
 
-        getImageWithCallback(target.context, urlToLoad) { result ->
-            // set the background to white for transparent images
-            if (whiteBackground) target.setBackgroundColor(Color.WHITE)
+        // only load online images if the data saver mode is disabled
+        if (DataSaverMode.isEnabled(target.context)) {
+            if (urlToLoad.startsWith(HTTP_SCHEME) && !isCached(urlToLoad)) return
+        }
 
-            target.setImageDrawable(result)
+        target.load(urlToLoad) {
+            listener(
+                onSuccess = { _, _ ->
+                    // set the background to white for transparent images
+                    if (whiteBackground) target.setBackgroundColor(Color.WHITE)
+                }
+            )
         }
     }
 
@@ -117,17 +135,6 @@ object ImageHelper {
             .build()
 
         return imageLoader.execute(request).image?.toBitmap()
-    }
-
-    private fun getImageWithCallback(context: Context, url: String?, onSuccess: (Drawable) -> Unit) {
-        val request = ImageRequest.Builder(context)
-            .data(url)
-            .target { drawable ->
-                onSuccess(drawable.asDrawable(context.resources))
-            }
-            .build()
-
-        imageLoader.enqueue(request)
     }
 
     /**

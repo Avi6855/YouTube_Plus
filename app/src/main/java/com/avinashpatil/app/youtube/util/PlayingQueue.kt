@@ -1,14 +1,14 @@
 package com.avinashpatil.app.youtube.util
 
 import androidx.media3.common.Player
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
-import com.avinashpatil.app.youtube.api.RetrofitInstance
-import com.avinashpatil.app.youtube.api.StreamsExtractor
 import com.avinashpatil.app.youtube.api.obj.StreamItem
 import com.avinashpatil.app.youtube.extensions.move
 import com.avinashpatil.app.youtube.extensions.runCatchingIO
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.helpers.PlayerHelper
+import com.avinashpatil.app.youtube.util.PlayingQueue.queueMode
 import kotlinx.coroutines.Job
 import java.util.Collections
 
@@ -19,6 +19,12 @@ object PlayingQueue {
 
     private val queueJobs = mutableListOf<Job>()
 
+    /**
+     * Current use case of the queue. Do NOT add any offline videos while the [queueMode] is online
+     * or vice versa.
+     */
+    var queueMode: PlayingQueueMode = PlayingQueueMode.ONLINE
+
     // wrapper around PlayerHelper#repeatMode for compatibility
     var repeatMode: Int
         get() = PlayerHelper.repeatMode
@@ -26,12 +32,30 @@ object PlayingQueue {
             PlayerHelper.repeatMode = value
         }
 
-    fun clear() {
+    private fun clearJobs() {
         queueJobs.forEach {
             it.cancel()
         }
         queueJobs.clear()
+    }
+
+    fun clear() {
+        clearJobs()
         queue.clear()
+        currentStream = null
+    }
+
+    /**
+     * Remove all items after the current [StreamItem] from the queue
+     *
+     * I.e., the current and all previous streams are kept
+     */
+    fun clearAfterCurrent() {
+        clearJobs()
+        synchronized(queue) {
+            val newQueue = queue.filterIndexed { index, item -> index <= currentIndex() }
+            setStreams(newQueue)
+        }
     }
 
     /**
@@ -76,12 +100,10 @@ object PlayingQueue {
 
     fun hasNext() = getNext() != null
 
-    fun updateCurrent(streamItem: StreamItem, asFirst: Boolean = true) = synchronized(queue) {
+    fun updateCurrent(streamItem: StreamItem) = synchronized(queue) {
         currentStream = streamItem
-        if (!contains(streamItem)) {
-            val indexToAdd = if (asFirst) 0 else size()
-            queue.add(indexToAdd, streamItem)
-        }
+
+        if (!contains(streamItem)) add(streamItem)
     }
 
     fun isNotEmpty() = queue.isNotEmpty()
@@ -109,6 +131,7 @@ object PlayingQueue {
 
     fun setStreams(streams: List<StreamItem>) = synchronized(queue) {
         queue.clear()
+
         queue.addAll(streams)
     }
 
@@ -147,7 +170,7 @@ object PlayingQueue {
 
         if (currentStream != null && reAddStream) {
             // re-add the stream to the end of the queue
-            updateCurrent(currentStream, false)
+            updateCurrent(currentStream)
         }
     }
 
@@ -158,7 +181,7 @@ object PlayingQueue {
     ) {
         var playlistNextPage = nextPage
         while (playlistNextPage != null) {
-            RetrofitInstance.authApi.getPlaylistNextPage(playlistId, playlistNextPage).run {
+            MediaServiceRepository.instance.getPlaylistNextPage(playlistId, playlistNextPage).run {
                 addToQueueAsync(relatedStreams, isMainList = isMainList)
                 playlistNextPage = this.nextpage
             }
@@ -177,7 +200,7 @@ object PlayingQueue {
         var channelNextPage = nextPage
         var pageIndex = 1
         while (channelNextPage != null && pageIndex < 10) {
-            RetrofitInstance.api.getChannelNextPage(channelId, channelNextPage).run {
+            MediaServiceRepository.instance.getChannelNextPage(channelId, channelNextPage).run {
                 addToQueueAsync(relatedStreams)
                 channelNextPage = this.nextpage
                 pageIndex++
@@ -186,14 +209,14 @@ object PlayingQueue {
     }
 
     private fun insertChannel(channelId: String, newCurrentStream: StreamItem) = runCatchingIO {
-        val channel = RetrofitInstance.api.getChannel(channelId)
+        val channel = MediaServiceRepository.instance.getChannel(channelId)
         addToQueueAsync(channel.relatedStreams, newCurrentStream)
         if (channel.nextpage == null) return@runCatchingIO
         fetchMoreFromChannel(channelId, channel.nextpage)
     }.let { queueJobs.add(it) }
 
     fun insertByVideoId(videoId: String) = runCatchingIO {
-        val streams = StreamsExtractor.extractStreams(videoId.toID())
+        val streams = MediaServiceRepository.instance.getStreams(videoId.toID())
         add(streams.toStreamItem(videoId))
     }
 
@@ -203,6 +226,8 @@ object PlayingQueue {
         channelId: String?,
         relatedStreams: List<StreamItem> = emptyList()
     ) {
+        updateCurrent(streamItem)
+
         if (playlistId != null) {
             insertPlaylist(playlistId, streamItem)
         } else if (channelId != null) {
@@ -210,7 +235,6 @@ object PlayingQueue {
         } else if (relatedStreams.isNotEmpty()) {
             insertRelatedStreams(relatedStreams)
         }
-        updateCurrent(streamItem)
     }
 
     fun insertRelatedStreams(streams: List<StreamItem>) {
@@ -221,4 +245,9 @@ object PlayingQueue {
 
         add(*streams.filter { !it.isLive }.toTypedArray(), skipExisting = true)
     }
+}
+
+enum class PlayingQueueMode {
+    ONLINE,
+    OFFLINE
 }

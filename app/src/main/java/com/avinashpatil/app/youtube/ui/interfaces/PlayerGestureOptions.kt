@@ -2,7 +2,7 @@ package com.avinashpatil.app.youtube.ui.interfaces
 
 interface PlayerGestureOptions {
 
-    fun onSingleTap()
+    fun onSingleTap(areControlsLocked: Boolean)
 
     fun onDoubleTapCenterScreen()
 
@@ -10,11 +10,11 @@ interface PlayerGestureOptions {
 
     fun onDoubleTapRightScreen()
 
-    fun onSwipeLeftScreen(distanceY: Float)
+    fun onSwipeLeftScreen(distanceY: Float, positionY: Float)
 
-    fun onSwipeRightScreen(distanceY: Float)
+    fun onSwipeRightScreen(distanceY: Float, positionY: Float)
 
-    fun onSwipeCenterScreen(distanceY: Float)
+    fun onSwipeCenterScreen(distanceY: Float, positionY: Float)
 
     fun onSwipeEnd()
 
@@ -23,6 +23,10 @@ interface PlayerGestureOptions {
     fun onMinimize()
 
     fun onFullscreenChange(isFullscreen: Boolean)
+
+    fun onLongPress()
+
+    fun onLongPressEnd()
 
     /**
      *  Returns a pair of the width and height of the view this listener is used for

@@ -1,5 +1,5 @@
 package com.avinashpatil.app.youtube.ui.adapters
-/*
+
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.annotation.DrawableRes
@@ -40,7 +40,7 @@ class IconsSheetAdapter : RecyclerView.Adapter<IconsSheetViewHolder>() {
         ) {
             object Default :
                 AppIcon(R.string.defaultIcon, R.mipmap.ic_launcher, "Default")
-
+/*
             object DefaultLight :
                 AppIcon(R.string.defaultIconLight, R.mipmap.ic_launcher_light, "DefaultLight")
 
@@ -53,10 +53,13 @@ class IconsSheetAdapter : RecyclerView.Adapter<IconsSheetViewHolder>() {
             object Shaped : AppIcon(R.string.shapedIcon, R.mipmap.ic_shaped, "IconShaped")
             object Flame : AppIcon(R.string.flameIcon, R.mipmap.ic_flame, "IconFlame")
             object Bird : AppIcon(R.string.birdIcon, R.mipmap.ic_bird, "IconBird")
+
+ */
         }
 
         val availableIcons = listOf(
-            AppIcon.Default,
+            AppIcon.Default
+                    /*
             AppIcon.DefaultLight,
             AppIcon.Legacy,
             AppIcon.Gradient,
@@ -65,7 +68,8 @@ class IconsSheetAdapter : RecyclerView.Adapter<IconsSheetViewHolder>() {
             AppIcon.Shaped,
             AppIcon.Flame,
             AppIcon.Bird
+
+                     */
         )
     }
 }
-*/

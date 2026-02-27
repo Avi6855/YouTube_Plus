@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.view.View
 import androidx.core.view.marginLeft
 import androidx.media3.common.util.UnstableApi
+import com.avinashpatil.app.youtube.api.obj.ChapterSegment
 import com.avinashpatil.app.youtube.api.obj.Segment
 import com.avinashpatil.app.youtube.extensions.dpToPx
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
@@ -18,7 +19,7 @@ import com.google.android.material.R
  * TimeBar that can be marked with SponsorBlock Segments
  */
 @UnstableApi
-class MarkableTimeBar(
+open class MarkableTimeBar(
     context: Context,
     attributeSet: AttributeSet? = null
 ) : DismissableTimeBar(context, attributeSet) {
@@ -38,7 +39,7 @@ class MarkableTimeBar(
         canvas.save()
         val horizontalOffset = (parent as View).marginLeft
         length = canvas.width - horizontalOffset * 2
-        val marginY = canvas.height / 2 - progressBarHeight / 2
+        val marginY =  (canvas.height - progressBarHeight) / 2
         val themeColor = ThemeHelper.getThemeColor(context, R.attr.colorOnSecondary)
 
         segments.forEach {
@@ -49,7 +50,7 @@ class MarkableTimeBar(
                     start.toLength() + horizontalOffset,
                     marginY,
                     end.toLength() + horizontalOffset,
-                    canvas.height - marginY
+                    marginY + progressBarHeight
                 ),
                 Paint().apply {
                     color = if (PreferenceHelper.getBoolean("sb_enable_custom_colors", false)) {
@@ -74,4 +75,6 @@ class MarkableTimeBar(
     fun clearSegments() {
         segments = listOf()
     }
+
+    open fun setChapters(it: List<ChapterSegment>) {}
 }

@@ -3,84 +3,42 @@ package com.avinashpatil.app.youtube.ui.fragments
 import android.os.Bundle
 import android.view.View
 import androidx.core.os.bundleOf
-import androidx.core.view.isGone
 import androidx.core.view.isVisible
-import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.fragment.app.commit
 import androidx.fragment.app.setFragmentResult
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.paging.LoadState
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.obj.Comment
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.databinding.FragmentCommentsBinding
 import com.avinashpatil.app.youtube.extensions.formatShort
-import com.avinashpatil.app.youtube.extensions.parcelable
-import com.avinashpatil.app.youtube.ui.adapters.CommentPagingAdapter
+import com.avinashpatil.app.youtube.helpers.NavigationHelper
+import com.avinashpatil.app.youtube.ui.adapters.CommentsPagingAdapter
 import com.avinashpatil.app.youtube.ui.models.CommentsViewModel
-import com.avinashpatil.app.youtube.ui.models.sources.CommentRepliesPagingSource
 import com.avinashpatil.app.youtube.ui.sheets.CommentsSheet
-import kotlinx.coroutines.launch
 
 class CommentsRepliesFragment : Fragment(R.layout.fragment_comments) {
-    private var _binding: FragmentCommentsBinding? = null
-    private val binding get() = _binding!!
 
     private val viewModel: CommentsViewModel by activityViewModels()
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        _binding = FragmentCommentsBinding.bind(view)
         super.onViewCreated(view, savedInstanceState)
-        val arguments = requireArguments()
-        val videoId = arguments.getString(IntentData.videoId, "")
-        val comment = arguments.parcelable<Comment>(IntentData.comment)!!
 
-        val commentsSheet = parentFragment as? CommentsSheet
-        commentsSheet?.binding?.btnScrollToTop?.isGone = true
-
-        val repliesAdapter = CommentPagingAdapter(
-            null,
-            videoId,
-            requireArguments().getString(IntentData.channelAvatar) ?: return,
-            isRepliesAdapter = true,
-            handleLink = {
-                setFragmentResult(CommentsSheet.HANDLE_LINK_REQUEST_KEY, bundleOf(IntentData.url to it))
-            }
-        ) {
-            setFragmentResult(CommentsSheet.DISMISS_SHEET_REQUEST_KEY, bundleOf())
-        }
-        commentsSheet?.updateFragmentInfo(
-            true,
-            "${getString(R.string.replies)} (${comment.replyCount.formatShort()})"
-        )
-
-        binding.commentsRV.updatePadding(top = 0)
-
-        val layoutManager = LinearLayoutManager(context)
+        val binding = FragmentCommentsBinding.bind(view)
+        val layoutManager = LinearLayoutManager(requireContext())
         binding.commentsRV.layoutManager = layoutManager
 
-        binding.commentsRV.adapter = repliesAdapter
-
-        // init scroll position
-        if (viewModel.currentRepliesPosition.value != null) {
-            if (viewModel.currentRepliesPosition.value!! > POSITION_START) {
-                layoutManager.scrollToPosition(viewModel.currentRepliesPosition.value!!)
-            } else {
-                layoutManager.scrollToPosition(POSITION_START)
-            }
-        }
-
+        val commentsSheet = parentFragment as? CommentsSheet
         commentsSheet?.binding?.btnScrollToTop?.setOnClickListener {
             // scroll back to the top / first comment
-            layoutManager.scrollToPosition(POSITION_START)
-            viewModel.setRepliesPosition(POSITION_START)
+            layoutManager.startSmoothScroll(LinearSmoothScroller(view.context).also {
+                it.targetPosition = POSITION_START
+            })
+            viewModel.setCommentsPosition(POSITION_START)
         }
 
         binding.commentsRV.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -88,42 +46,84 @@ class CommentsRepliesFragment : Fragment(R.layout.fragment_comments) {
                 if (newState != RecyclerView.SCROLL_STATE_IDLE) return
 
                 val firstVisiblePosition = layoutManager.findFirstVisibleItemPosition()
-
-                // hide or show the scroll to top button
-                commentsSheet?.binding?.btnScrollToTop?.isVisible = firstVisiblePosition != 0
-                viewModel.setRepliesPosition(firstVisiblePosition)
-
-                super.onScrollStateChanged(recyclerView, newState)
+                viewModel.setCommentsPosition(firstVisiblePosition)
             }
         })
 
-        val commentRepliesFlow = Pager(PagingConfig(20, enablePlaceholders = false)) {
-            CommentRepliesPagingSource(videoId, comment)
-        }.flow
+        commentsSheet?.updateFragmentInfo(false, getString(R.string.comments))
 
-        viewLifecycleOwner.lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch {
-                    repliesAdapter.loadStateFlow.collect {
-                        binding.progress.isVisible = it.refresh is LoadState.Loading
+        val commentPagingAdapter = CommentsPagingAdapter(
+            false,
+            requireArguments().getString(IntentData.channelAvatar),
+            handleLink = {
+                setFragmentResult(
+                    CommentsSheet.HANDLE_LINK_REQUEST_KEY,
+                    bundleOf(IntentData.url to it),
+                )
+            },
+            saveToClipboard = { comment ->
+                viewModel.saveToClipboard(view.context, comment)
+            },
+            navigateToChannel = { comment ->
+                NavigationHelper.navigateChannel(view.context, comment.commentorUrl)
+                setFragmentResult(CommentsSheet.DISMISS_SHEET_REQUEST_KEY, Bundle.EMPTY)
+            },
+            navigateToReplies = { comment, channelAvatar ->
+                if (comment.repliesPage != null) {
+                    val args = bundleOf(
+                        IntentData.videoId to viewModel.videoIdLiveData.value,
+                        IntentData.comment to comment,
+                        IntentData.channelAvatar to channelAvatar
+                    )
+                    parentFragmentManager.commit {
+                        viewModel.setLastOpenedCommentRepliesId(comment.commentId)
+                        replace(
+                            R.id.commentFragContainer,
+                            CommentsRepliesFragment().apply { arguments = args }
+                        )
+                        addToBackStack(null)
                     }
                 }
+            },
+        )
+        binding.commentsRV.adapter = commentPagingAdapter
 
-                launch {
-                    commentRepliesFlow.collect {
-                        repliesAdapter.submitData(it)
-                    }
+        commentPagingAdapter.addLoadStateListener { loadStates ->
+            binding.progress.isVisible = loadStates.refresh is LoadState.Loading
+
+            val refreshState = loadStates.source.refresh
+            if (refreshState is LoadState.NotLoading && commentPagingAdapter.itemCount > 0) {
+                viewModel.currentCommentsPosition.value?.let { position ->
+                    binding.commentsRV.scrollToPosition(maxOf(position, POSITION_START))
                 }
             }
+
+            if (loadStates.append is LoadState.NotLoading && loadStates.append.endOfPaginationReached && commentPagingAdapter.itemCount == 0) {
+                binding.errorTV.text = getString(R.string.no_comments_available)
+                binding.errorTV.isVisible = true
+            }
+        }
+
+        viewModel.currentCommentsPosition.observe(viewLifecycleOwner) {
+            // hide or show the scroll to top button
+            commentsSheet?.binding?.btnScrollToTop?.isVisible = it != 0
+        }
+
+        viewModel.commentsLiveData.observe(viewLifecycleOwner) {
+            commentPagingAdapter.submitData(lifecycle, it)
+        }
+
+        viewModel.commentCountLiveData.observe(viewLifecycleOwner) { commentCount ->
+            if (commentCount == null) return@observe
+
+            commentsSheet?.updateFragmentInfo(
+                false,
+                getString(R.string.comments_count, commentCount.formatShort())
+            )
         }
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
-    }
-
     companion object {
-        const val POSITION_START = 0
+        private const val POSITION_START = 0
     }
 }

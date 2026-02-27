@@ -1,9 +1,6 @@
 package com.avinashpatil.app.youtube.ui.activities
 
-import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -14,13 +11,12 @@ import android.view.ViewTreeObserver
 import android.widget.ScrollView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.annotation.ColorInt
 import androidx.appcompat.widget.SearchView
+import androidx.constraintlayout.motion.widget.Key
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.net.toUri
 import androidx.core.os.bundleOf
-import androidx.core.text.bold
-import androidx.core.text.buildSpannedString
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.allViews
 import androidx.core.view.children
 import androidx.core.view.isNotEmpty
@@ -38,8 +34,11 @@ import com.avinashpatil.app.youtube.compat.PictureInPictureCompat
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.databinding.ActivityMainBinding
+import com.avinashpatil.app.youtube.db.DatabaseHelper
+import com.avinashpatil.app.youtube.db.obj.SearchHistoryItem
 import com.avinashpatil.app.youtube.enums.ImportFormat
-import com.avinashpatil.app.youtube.extensions.toID
+import com.avinashpatil.app.youtube.enums.TopLevelDestination
+import com.avinashpatil.app.youtube.extensions.anyChildFocused
 import com.avinashpatil.app.youtube.helpers.ImportHelper
 import com.avinashpatil.app.youtube.helpers.IntentHelper
 import com.avinashpatil.app.youtube.helpers.NavBarHelper
@@ -47,19 +46,19 @@ import com.avinashpatil.app.youtube.helpers.NavigationHelper
 import com.avinashpatil.app.youtube.helpers.NetworkHelper
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.helpers.ThemeHelper
-import com.avinashpatil.app.youtube.helpers.WindowHelper
 import com.avinashpatil.app.youtube.ui.base.BaseActivity
 import com.avinashpatil.app.youtube.ui.dialogs.ErrorDialog
 import com.avinashpatil.app.youtube.ui.dialogs.ImportTempPlaylistDialog
+import com.avinashpatil.app.youtube.ui.extensions.onSystemInsets
 import com.avinashpatil.app.youtube.ui.fragments.AudioPlayerFragment
 import com.avinashpatil.app.youtube.ui.fragments.DownloadsFragment
 import com.avinashpatil.app.youtube.ui.fragments.PlayerFragment
 import com.avinashpatil.app.youtube.ui.models.SearchViewModel
 import com.avinashpatil.app.youtube.ui.models.SubscriptionsViewModel
+import com.avinashpatil.app.youtube.ui.preferences.BackupRestoreSettings
 import com.avinashpatil.app.youtube.ui.preferences.BackupRestoreSettings.Companion.FILETYPE_ANY
 import com.avinashpatil.app.youtube.util.UpdateChecker
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.elevation.SurfaceColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -67,7 +66,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 class MainActivity : BaseActivity() {
     lateinit var binding: ActivityMainBinding
     lateinit var navController: NavController
-    lateinit var searchView: SearchView
+
+    private lateinit var searchView: SearchView
     private lateinit var searchItem: MenuItem
 
     private var startFragmentId = R.id.homeFragment
@@ -98,10 +98,8 @@ class MainActivity : BaseActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
-
-        // enable auto rotation if turned on
-        requestOrientationChange()
 
         // show noInternet Activity if no internet available on app startup
         if (!NetworkHelper.isNetworkAvailable(this)) {
@@ -109,7 +107,12 @@ class MainActivity : BaseActivity() {
             startActivity(noInternetIntent)
             finish()
             return
-        } else if (PreferenceHelper.getString(PreferenceKeys.FETCH_INSTANCE, "").isEmpty()) {
+        }
+
+        val isAppConfigured =
+            PreferenceHelper.getBoolean(PreferenceKeys.LOCAL_FEED_EXTRACTION, false) ||
+                    PreferenceHelper.getString(PreferenceKeys.FETCH_INSTANCE, "").isNotEmpty()
+        if (!isAppConfigured) {
             val welcomeIntent = Intent(this, WelcomeActivity::class.java)
             startActivity(welcomeIntent)
             finish()
@@ -118,6 +121,56 @@ class MainActivity : BaseActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // manually apply additional padding for edge-to-edge compatibility
+        // see https://developer.android.com/develop/ui/views/layout/edge-to-edge
+        binding.root.onSystemInsets { _, systemBarInsets ->
+            // there's a possibility that the paddings are not being applied properly when
+            // exiting from player's fullscreen. Adding OnGlobalLayoutListener serves as
+            // a workaround for this issue
+            binding.root.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    with(binding.appBarLayout) {
+                        setPadding(
+                            paddingLeft,
+                            systemBarInsets.top,
+                            paddingRight,
+                            paddingBottom
+                        )
+                    }
+                    with(binding.bottomNav) {
+                        setPadding(
+                            paddingLeft,
+                            paddingTop,
+                            paddingRight,
+                            systemBarInsets.bottom
+                        )
+                    }
+                    binding.root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                }
+            })
+        }
+        // manually update the bottom bar height in the mini player transition
+        binding.bottomNav.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val transition = binding.root.getTransition(R.id.bottom_bar_transition)
+            transition.keyFrameList.forEach { keyFrame ->
+                // These frame positions are hardcoded in activity_main_scene.xml!
+                for (key in keyFrame.getKeyFramesForView(binding.bottomNav.id)) {
+                    if (key.framePosition == 1) key.setValue(
+                        Key.TRANSLATION_Y,
+                        binding.bottomNav.height
+                    )
+                }
+                for (key in keyFrame.getKeyFramesForView(binding.container.id)) {
+                    if (key.framePosition == 100) key.setValue(
+                        Key.TRANSLATION_Y,
+                        -binding.bottomNav.height
+                    )
+                }
+            }
+            binding.root.scene.setTransition(transition)
+        }
 
         // Check update automatically
         if (PreferenceHelper.getBoolean(PreferenceKeys.AUTOMATIC_UPDATE_CHECKS, false)) {
@@ -140,16 +193,10 @@ class MainActivity : BaseActivity() {
             R.id.homeFragment
         }
 
-        // sets the color if the navigation bar is visible
-        val bottomNavColor = getBottomNavColor()
-        ThemeHelper.setSystemBarColors(this, window, bottomNavColor)
-
         // set default tab as start fragment
         navController.graph = navController.navInflater.inflate(R.navigation.nav).also {
             it.setStartDestination(startFragmentId)
         }
-
-        binding.bottomNav.setOnApplyWindowInsetsListener(null)
 
         // Prevent duplicate entries into backstack, if selected item and current
         // visible fragment is different, then navigate to selected item.
@@ -182,20 +229,6 @@ class MainActivity : BaseActivity() {
         loadIntentData()
 
         showUserInfoDialogIfNeeded()
-    }
-
-    @ColorInt
-    fun getBottomNavColor(): Int? {
-        return if (binding.bottomNav.menu.size() == 0) {
-            null
-        } else if (PreferenceHelper.getBoolean(PreferenceKeys.PURE_THEME, false)) {
-            SurfaceColors.getColorForElevation(this, binding.bottomNav.elevation)
-        } else {
-            ThemeHelper.getThemeColor(
-                this,
-                com.google.android.material.R.attr.colorSurfaceContainer
-            )
-        }
     }
 
     /**
@@ -237,9 +270,12 @@ class MainActivity : BaseActivity() {
         subscriptionsViewModel.fetchSubscriptions(this)
 
         subscriptionsViewModel.videoFeed.observe(this) { feed ->
+            val lastCheckedFeedTime = PreferenceHelper.getLastCheckedFeedTime(seenByUser = true)
             val lastSeenVideoIndex = feed.orEmpty()
-                .indexOfFirst { PreferenceHelper.getLastSeenVideoId() == it.url?.toID() }
+                .filter { !it.isUpcoming }
+                .indexOfFirst { it.uploaded <= lastCheckedFeedTime }
             if (lastSeenVideoIndex < 1) return@observe
+
             binding.bottomNav.getOrCreateBadge(R.id.subscriptionsFragment).apply {
                 number = lastSeenVideoIndex
                 backgroundColor = ThemeHelper.getThemeColor(
@@ -264,6 +300,17 @@ class MainActivity : BaseActivity() {
             R.id.channelFragment,
             R.id.playlistFragment
         )
+    }
+
+    private fun addSearchQueryToHistory(query: String) {
+        val searchHistoryEnabled =
+            PreferenceHelper.getBoolean(PreferenceKeys.SEARCH_HISTORY_TOGGLE, true)
+        if (searchHistoryEnabled && query.isNotEmpty()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val newItem = SearchHistoryItem(query.trim())
+                DatabaseHelper.addToSearchHistory(newItem)
+            }
+        }
     }
 
     override fun invalidateMenu() {
@@ -302,6 +349,8 @@ class MainActivity : BaseActivity() {
                 }
 
                 navController.navigate(NavDirections.showSearchResults(query))
+
+                addSearchQueryToHistory(query)
 
                 return true
             }
@@ -375,6 +424,16 @@ class MainActivity : BaseActivity() {
     }
 
     /**
+     * @return whether the search view focus was cleared successfully
+     */
+    fun clearSearchViewFocus(): Boolean {
+        if (!this::searchView.isInitialized || !searchView.anyChildFocused()) return false
+
+        searchView.clearFocus()
+        return true
+    }
+
+    /**
      * Update the query text in the search bar without opening the search suggestions
      */
     fun setQuerySilent(query: String) {
@@ -383,6 +442,14 @@ class MainActivity : BaseActivity() {
         shouldOpenSuggestions = false
         searchView.setQuery(query, false)
         shouldOpenSuggestions = true
+    }
+
+    /**
+     * Update the query text in the search bar and load the search suggestions
+     * @param submit whether to immediately load the search results (not suggestions)
+     */
+    fun setQuery(query: String, submit: Boolean) {
+        if (::searchView.isInitialized) searchView.setQuery(query, submit)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -401,7 +468,7 @@ class MainActivity : BaseActivity() {
                 startActivity(aboutIntent)
                 true
             }
-
+/*
             R.id.action_help -> {
                 val helpIntent = Intent(this, HelpActivity::class.java)
                 startActivity(helpIntent)
@@ -418,6 +485,8 @@ class MainActivity : BaseActivity() {
                 true
             }
 
+ */
+
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -430,7 +499,16 @@ class MainActivity : BaseActivity() {
             startActivity(nIntent)
         }
 
-        if (intent?.getBooleanExtra(IntentData.openAudioPlayer, false) == true) {
+        if (intent?.getBooleanExtra(IntentData.maximizePlayer, false) == true) {
+            // attempt to open the current video player fragment
+            if (intent?.getBooleanExtra(IntentData.audioOnly, false) == false) {
+                runOnPlayerFragment { binding.playerMotionLayout.transitionToStart(); true }
+                return
+            }
+
+            // if it's an audio only session, attempt to maximize the audio player or create a new one
+            if (runOnAudioPlayerFragment { binding.playerMotionLayout.transitionToStart(); true }) return
+
             val offlinePlayer = intent!!.getBooleanExtra(IntentData.offlinePlayer, false)
             NavigationHelper.openAudioPlayerFragment(this, offlinePlayer = offlinePlayer)
             return
@@ -439,23 +517,29 @@ class MainActivity : BaseActivity() {
         // navigate to (temporary) playlist or channel if available
         if (navigateToMediaByIntent(intent)) return
 
+        // Get saved search query if available
         intent?.getStringExtra(IntentData.query)?.let {
             savedSearchQuery = it
         }
 
-        intent?.getStringExtra("fragmentToOpen")?.let {
-            if (it != "downloads") { // Not a shortcut
-                ShortcutManagerCompat.reportShortcutUsed(this, it)
-            }
+        // Open the Downloads screen if requested
+        if (intent?.getBooleanExtra(IntentData.OPEN_DOWNLOADS, false) == true) {
+            navController.navigate(R.id.downloadsFragment)
+            return
+        }
 
+        // Handle navigation from app shortcuts (Home, Trends, etc.)
+        intent?.getStringExtra(IntentData.fragmentToOpen)?.let {
+            ShortcutManagerCompat.reportShortcutUsed(this, it)
             when (it) {
-                "home" -> navController.navigate(R.id.homeFragment)
-                "trends" -> navController.navigate(R.id.trendsFragment)
-                "subscriptions" -> navController.navigate(R.id.subscriptionsFragment)
-                "library" -> navController.navigate(R.id.libraryFragment)
-                "downloads" -> navController.navigate(R.id.downloadsFragment)
+                TopLevelDestination.Home.route -> navController.navigate(R.id.homeFragment)
+                TopLevelDestination.Trends.route -> navController.navigate(R.id.trendsFragment)
+                TopLevelDestination.Subscriptions.route -> navController.navigate(R.id.subscriptionsFragment)
+                TopLevelDestination.Library.route -> navController.navigate(R.id.libraryFragment)
             }
         }
+
+        // Rebind the download service if the user is currently downloading
         if (intent?.getBooleanExtra(IntentData.downloading, false) == true) {
             (supportFragmentManager.fragments.find { it is NavHostFragment })
                 ?.childFragmentManager?.fragments?.forEach { fragment ->
@@ -509,7 +593,7 @@ class MainActivity : BaseActivity() {
                     override fun onGlobalLayout() {
                         NavigationHelper.navigateVideo(
                             context = this@MainActivity,
-                            videoUrlOrId = it,
+                            videoId = it,
                             timestamp = intent.getLongExtra(IntentData.timeStamp, 0L)
                         )
 
@@ -519,7 +603,7 @@ class MainActivity : BaseActivity() {
             } else {
                 NavigationHelper.navigateVideo(
                     context = this@MainActivity,
-                    videoUrlOrId = it,
+                    videoId = it,
                     timestamp = intent.getLongExtra(IntentData.timeStamp, 0L)
                 )
             }
@@ -528,16 +612,6 @@ class MainActivity : BaseActivity() {
         }
 
         return false
-    }
-
-    @SuppressLint("SwitchIntDef")
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-
-        when (newConfig.orientation) {
-            Configuration.ORIENTATION_PORTRAIT -> WindowHelper.toggleFullscreen(window, false)
-            Configuration.ORIENTATION_LANDSCAPE -> WindowHelper.toggleFullscreen(window, true)
-        }
     }
 
     private fun navigateToBottomSelectedItem(item: MenuItem): Boolean {
@@ -567,7 +641,7 @@ class MainActivity : BaseActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (runOnPlayerFragment { onKeyUp(keyCode) }) {
+        if (runOnPlayerFragment { this@runOnPlayerFragment.onKeyUp(keyCode, event) }) {
             return true
         }
 
@@ -592,10 +666,18 @@ class MainActivity : BaseActivity() {
             ?: false
     }
 
-    fun startPlaylistExport(playlistId: String, playlistName: String, format: ImportFormat) {
+    fun startPlaylistExport(
+        playlistId: String,
+        playlistName: String,
+        format: ImportFormat,
+        includeTimestamp: Boolean
+    ) {
         playlistExportFormat = format
         exportPlaylistId = playlistId
-        createPlaylistsFile.launch("${playlistName}.${format.fileExtension}")
+
+        val fileName =
+            BackupRestoreSettings.getExportFileName(this, format, playlistName, includeTimestamp)
+        createPlaylistsFile.launch(fileName)
     }
 
     private fun showUserInfoDialogIfNeeded() {
@@ -606,9 +688,7 @@ class MainActivity : BaseActivity() {
             PreferenceHelper.getInt(PreferenceKeys.LAST_SHOWN_INFO_MESSAGE_VERSION_CODE, -1)
 
         // mapping of version code to info message
-        val infoMessages = listOf(
-            59 to getUpdateInfoText(this)
-        )
+        val infoMessages = emptyList<Pair<Int, String>>()
 
         val message =
             infoMessages.lastOrNull { (versionCode, _) -> versionCode > lastShownVersionCode }?.second
@@ -625,31 +705,5 @@ class MainActivity : BaseActivity() {
                 )
             }
             .show()
-    }
-
-    private fun getUpdateInfoText(context: Context) = buildSpannedString {
-        append("Most public Piped instances are not able to load any videos as of today because they're rate-limited very quickly by YouTube. Therefore please consider enabling ")
-        bold {
-            append(context.getString(R.string.local_stream_extraction))
-        }
-        append(" under ")
-        bold {
-            append("Settings -> Instance")
-        }
-        append(" in order to fetch video streams directly from YouTube without Piped in-between. Any other content will still be loaded via Piped.")
-
-        appendLine()
-        appendLine()
-
-        append("Due to the above mentioned issue, some instances do not properly generate the subscriptions feed. To fetch the feed directly from your phone, enable ")
-        bold {
-            append(context.getString(R.string.local_feed_extraction))
-        }
-        append(". Note that this might be slow if you have a lot of subscriptions.")
-
-        appendLine()
-        appendLine()
-
-        append("Please see the pinned issues at GitHub for more information on that topic.")
     }
 }

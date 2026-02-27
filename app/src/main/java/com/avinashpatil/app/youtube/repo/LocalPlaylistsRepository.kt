@@ -1,9 +1,8 @@
 package com.avinashpatil.app.youtube.repo
 
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.api.PlaylistsHelper
 import com.avinashpatil.app.youtube.api.PlaylistsHelper.MAX_CONCURRENT_IMPORT_CALLS
-import com.avinashpatil.app.youtube.api.RetrofitInstance
-import com.avinashpatil.app.youtube.api.StreamsExtractor
 import com.avinashpatil.app.youtube.api.obj.Playlist
 import com.avinashpatil.app.youtube.api.obj.Playlists
 import com.avinashpatil.app.youtube.api.obj.StreamItem
@@ -45,9 +44,15 @@ class LocalPlaylistsRepository: PlaylistRepository {
 
         for (video in videos) {
             val localPlaylistItem = video.toLocalPlaylistItem(playlistId)
-            // avoid duplicated videos in a playlist
-            DatabaseHolder.Database.localPlaylistsDao()
-                .deletePlaylistItemsByVideoId(playlistId, localPlaylistItem.videoId)
+
+            val existingVideo = DatabaseHolder.Database.localPlaylistsDao()
+                .getPlaylistVideo(playlistId, localPlaylistItem.videoId)
+            if (existingVideo != null) {
+                // update existing video metadata
+                localPlaylistItem.id = existingVideo.id
+                DatabaseHolder.Database.localPlaylistsDao().updatePlaylistVideo(localPlaylistItem)
+                continue
+            }
 
             // add the new video to the database
             DatabaseHolder.Database.localPlaylistsDao().addPlaylistVideo(localPlaylistItem)
@@ -84,7 +89,7 @@ class LocalPlaylistsRepository: PlaylistRepository {
     }
 
     override suspend fun clonePlaylist(playlistId: String): String {
-        val playlist = RetrofitInstance.api.getPlaylist(playlistId)
+        val playlist = MediaServiceRepository.instance.getPlaylist(playlistId)
         val newPlaylist = createPlaylist(playlist.name ?: "Unknown name")
 
         PlaylistsHelper.addToPlaylist(newPlaylist, *playlist.relatedStreams.toTypedArray())
@@ -92,7 +97,7 @@ class LocalPlaylistsRepository: PlaylistRepository {
         var nextPage = playlist.nextpage
         while (nextPage != null) {
             nextPage = runCatching {
-                RetrofitInstance.api.getPlaylistNextPage(playlistId, nextPage!!).apply {
+                MediaServiceRepository.instance.getPlaylistNextPage(playlistId, nextPage!!).apply {
                     PlaylistsHelper.addToPlaylist(newPlaylist, *relatedStreams.toTypedArray())
                 }.nextpage
             }.getOrNull()
@@ -125,7 +130,7 @@ class LocalPlaylistsRepository: PlaylistRepository {
             // Only do so with `MAX_CONCURRENT_IMPORT_CALLS` videos at once to prevent performance issues
             for (videoIdList in playlist.videos.chunked(MAX_CONCURRENT_IMPORT_CALLS)) {
                 val streams = videoIdList.parallelMap {
-                    runCatching { StreamsExtractor.extractStreams(it) }
+                    runCatching { MediaServiceRepository.instance.getStreams(it) }
                         .getOrNull()
                         ?.toStreamItem(it)
                 }.filterNotNull()

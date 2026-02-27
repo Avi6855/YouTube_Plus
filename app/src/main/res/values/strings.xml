@@ -51,6 +51,9 @@
     <string name="playlistName">Playlist name</string>
     <string name="emptyPlaylistName">The playlist name can\'t be empty</string>
     <string name="addToPlaylist">Add to playlist</string>
+    <string name="createNewPlaylist">Create new playlist</string>
+    <string name="export_playlist">Export playlist</string>
+    <string name="import_watch_history">Import watch history</string>
     <string name="success">Done.</string>
     <string name="fail">Failed :(</string>
     <string name="about">About</string>
@@ -110,6 +113,9 @@
     <string name="category_preview_summary">For segments detailing future content without additional info. If it includes clips that only appear here, this is very likely the wrong category</string>
     <string name="category_highlight">Show video highlight</string>
     <string name="category_highlight_summary">Could either be the advertised title, the thumbnail or the most interesting part of the video. You can skip to it by tapping on it in the chapters section</string>
+    <string name="category_exclusive_access">Exclusive Access</string>
+    <string name="category_hook">Hook/Greetings</string>
+    <string name="category_hook_summary">For narrative hooks that grab the viewer\'s attention (often as the first scene) by teasing or describing events from later in the same video or future episodes in a series</string>
     <string name="license">License</string>
     <string name="color_accent">Accents</string>
     <string name="color_red">Resting red</string>
@@ -164,6 +170,7 @@
     <string name="buffering_goal_summary">Max. amount of seconds of video to buffer</string>
     <string name="playerVideoFormat">Video format for player</string>
     <string name="no_audio">No audio</string>
+    <string name="audio_codecs">Audio codecs</string>
     <string name="no_video">No video</string>
     <string name="no_subtitle">No subtitle</string>
     <string name="audio">Audio</string>
@@ -245,6 +252,14 @@
     <string name="show_stream_thumbnails">Show stream thumbnails</string>
     <string name="show_stream_thumbnails_summary">Show the thumbnails of new streams. Enabling this will consume additional data</string>
     <string name="checking_frequency">Checking every …</string>
+    <string name="show_updates_summary">Check for updates automatically every time the app is started.</string>
+    <string name="checking_frequency_15_minutes">15 minutes</string>
+    <string name="checking_frequency_30_minutes">30 minutes</string>
+    <string name="checking_frequency_60_minutes">60 minutes</string>
+    <string name="checking_frequency_2_hours">2 hours</string>
+    <string name="checking_frequency_6_hours">6 hours</string>
+    <string name="checking_frequency_12_hours">12 hours</string>
+    <string name="checking_frequency_1_day">1 day</string>
     <string name="irreversible">Are you sure? This can\'t be undone!</string>
     <string name="history_empty">No history yet.</string>
     <string name="most_recent">Newest</string>
@@ -445,6 +460,8 @@
     <string name="visibility_public">Public</string>
     <string name="visibility_unlisted">Unlisted</string>
     <string name="sort_by">Sort by</string>
+    <string name="sort_channel">Channel name</string>
+    <string name="sort_size">Size</string>
     <string name="uploader_name">Uploader name</string>
     <string name="duration_span">Duration: %1$s</string>
     <string name="remove_watched_videos">Remove watched videos</string>
@@ -467,8 +484,18 @@
     <string name="behavior_when_minimized">Behavior when minimized</string>
     <string name="external_player">External player</string>
     <string name="screenshot">Screenshot</string>
+    <string name="screenshot_saved">Screenshot saved</string>
+
+    <!-- Crash / Mode -->
+    <string name="crashlog">Crashlog</string>
+    <string name="never_show_again">Never show this again</string>
+    <string name="update_information">Update information</string>
+    <string name="mode_of_operation">Mode of operation</string>
+    <string name="delete_playlist_include_vidoes">Also delete all videos from the playlist?</string>
 
     <!-- Backup & Restore Settings -->
+    <string name="backup_creation_success">Backup completed successfully</string>
+    <string name="backup_creation_failed">Failed to create backup</string>
     <string name="import_subscriptions_from">Import subscriptions from</string>
     <string name="export_subscriptions_to">Export subscriptions to</string>
     <string name="import_playlists_from">Import playlists from</string>
@@ -477,6 +504,7 @@
     <string name="import_format_newpipe">NewPipe</string>
     <string name="import_format_freetube">FreeTube</string>
     <string name="import_format_youtube_csv">YouTube (CSV)</string>
+    <string name="import_format_list_of_urls">List of URLs or video IDs</string>
     <string name="home_tab_content">Home tab content</string>
     <string name="show_search_suggestions">Show search suggestions</string>
     <string name="audio_track_format">%1$s - %2$s</string>
@@ -500,11 +528,24 @@
     <string name="sponsorblock_user_id">SponsorBlock UserID</string>
     <string name="filename_too_long">Filename too long!</string>
     <string name="remember_playback_speed">Remember playback speed</string>
+    <string name="playback_pitch_semitone_error_input">Value must be between -%1$.1f (minimum) and %1$.1f (maximum)</string>
     <string name="successfully_removed_from_playlist">Successfully removed \"%1$s\" from the playlist.</string>
     <string name="watched">Watched</string>
     <string name="no_segments_found">There are no segments for this video yet.</string>
     <string name="start_sleep_timer">Start sleep timer</string>
     <string name="disable_sleep_timer">Disable sleep timer</string>
+    <plurals name="minutes_left">
+        <item quantity="one">%d min left</item>
+        <item quantity="two">%d min left</item>
+        <item quantity="few">%d min left</item>
+        <item quantity="many">%d min left</item>
+        <item quantity="other">%d min left</item>
+    </plurals>
+
+    <plurals name="sleep_timer_chip_minutes">
+        <item quantity="many">%d min</item>
+        <item quantity="other">%d min</item>
+    </plurals>
     <string name="time_in_minutes">Time in minutes</string>
     <string name="invalid_input">Invalid input</string>
     <string name="add_to_group">Add to group</string>
@@ -513,6 +554,52 @@
     <string name="gestures">Gestures</string>
     <string name="external_download_provider">External download provider</string>
     <string name="external_download_provider_summary">Enter the package name of the app you want to use for downloading videos. Leave blank to use LibreTube\'s inbuilt downloader.</string>
+
+    <!-- Local extraction features -->
+    <string name="local_stream_extraction">Local stream extraction</string>
+    <string name="local_stream_extraction_summary">Directly fetch video playback information from YouTube without using Piped.</string>
+
+    <string name="local_ryd">Local Return Youtube Dislike extractor</string>
+    <string name="local_ryd_summary">Directly fetch dislike information from https://returnyoutubedislikeapi.com</string>
+
+    <string name="local_feed_extraction">Local feed extraction</string>
+    <string name="local_feed_extraction_summary">Directly fetch the feed from YouTube. This may be significantly slower.</string>
+
+    <string name="full_local_mode">Full local mode</string>
+    <string name="full_local_mode_desc">Directly fetch everything from YouTube, without using Piped.</string>
+
+    <!-- Offline dialog -->
+    <string name="dialog_play_offline_title">A local version of this video is available.</string>
+
+    <string name="dialog_play_offline_body">Would you like to play the video from the download folder?</string>
+
+    <!-- View count -->
+    <string name="view_count">%1$s views</string>
+
+    <!-- Delete watched -->
+    <string name="delete_only_watched_videos">Only delete already watched videos</string>
+
+    <!-- Upcoming / Feed -->
+    <string name="upcoming">Upcoming</string>
+    <string name="show_upcoming_videos">Show upcoming videos</string>
+    <string name="updating_feed">Updating feed …</string>
+
+    <!-- Authentication / Categories -->
+    <string name="authentication">Authentication</string>
+    <string name="gaming">Gaming</string>
+    <string name="podcasts">Podcasts</string>
+    <string name="trailers">Trailers</string>
+    <string name="music">Music</string>
+
+    <!-- Timestamp filename -->
+    <string name="include_timestamp_in_filename">Include timestamp in filename</string>
+
+    <!-- Search improvement -->
+    <string name="did_you_mean">Did you mean:</string>
+    <string name="showing_results_for">Showing results for:</string>
+
+    <!-- Snackbar message -->
+    <string name="unsubscribe_snackbar_message">Successfully unsubscribed from %1$s</string>
 
     <!-- Notification channel strings -->
     <string name="download_channel_name">Download Service</string>

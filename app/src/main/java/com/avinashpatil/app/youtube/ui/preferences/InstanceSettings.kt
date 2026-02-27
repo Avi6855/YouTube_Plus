@@ -4,41 +4,38 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.SwitchPreferenceCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.InstanceRepository
+import com.avinashpatil.app.youtube.api.PipedMediaServiceRepository
 import com.avinashpatil.app.youtube.api.RetrofitInstance
 import com.avinashpatil.app.youtube.api.obj.PipedInstance
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.constants.PreferenceKeys
 import com.avinashpatil.app.youtube.databinding.SimpleOptionsRecyclerBinding
-import com.avinashpatil.app.youtube.db.DatabaseHolder.Database
-import com.avinashpatil.app.youtube.extensions.toastFromMainDispatcher
+import com.avinashpatil.app.youtube.extensions.toastFromMainThread
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 import com.avinashpatil.app.youtube.ui.adapters.InstancesAdapter
 import com.avinashpatil.app.youtube.ui.base.BasePreferenceFragment
-import com.avinashpatil.app.youtube.ui.dialogs.CustomInstanceDialog
+import com.avinashpatil.app.youtube.ui.dialogs.CreateCustomInstanceDialog
+import com.avinashpatil.app.youtube.ui.dialogs.CustomInstancesListDialog
 import com.avinashpatil.app.youtube.ui.dialogs.DeleteAccountDialog
 import com.avinashpatil.app.youtube.ui.dialogs.LoginDialog
 import com.avinashpatil.app.youtube.ui.dialogs.LogoutDialog
+import com.avinashpatil.app.youtube.ui.models.InstancesModel
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.common.collect.ImmutableList
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class InstanceSettings : BasePreferenceFragment() {
-    override val titleResourceId: Int = R.string.instance
     private val token get() = PreferenceHelper.getToken()
     private var instances = mutableListOf<PipedInstance>()
-    private val authInstanceToggle get() = findPreference<SwitchPreferenceCompat>(
-        PreferenceKeys.AUTH_INSTANCE_TOGGLE
-    )!!
+    private val customInstancesModel: InstancesModel by activityViewModels()
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.instance_settings, rootKey)
@@ -52,46 +49,35 @@ class InstanceSettings : BasePreferenceFragment() {
         val appContext = requireContext().applicationContext
 
         lifecycleScope.launch {
-            // update the instances to also show custom ones
-            initInstancesPref(instancePrefs, InstanceRepository(appContext).getInstancesFallback())
+            customInstancesModel.fetchCustomInstances {
+                appContext.toastFromMainThread(it.message.orEmpty())
+            }
+        }
 
-            // try to fetch the public list of instances async
-            val instanceRepo = InstanceRepository(appContext)
-            val instances = instanceRepo.getInstances()
-                .onFailure {
-                    appContext.toastFromMainDispatcher(it.message.orEmpty())
-                }
-            initInstancesPref(
-                instancePrefs,
-                instances.getOrDefault(instanceRepo.getInstancesFallback())
-            )
+        lifecycleScope.launch {
+            customInstancesModel.instances.collect { updatedInstances ->
+                instances = updatedInstances
+                // update the instances to also show custom ones
+                initInstancesPref(instancePrefs)
+            }
         }
 
         authInstance.setOnPreferenceChangeListener { _, _ ->
-            RetrofitInstance.lazyMgr.reset()
+            RetrofitInstance.apiLazyMgr.reset()
             logoutAndUpdateUI()
             true
         }
 
         authInstanceToggle.setOnPreferenceChangeListener { _, _ ->
-            RetrofitInstance.lazyMgr.reset()
+            RetrofitInstance.apiLazyMgr.reset()
             logoutAndUpdateUI()
             true
         }
 
         val customInstance = findPreference<Preference>(PreferenceKeys.CUSTOM_INSTANCE)
         customInstance?.setOnPreferenceClickListener {
-            CustomInstanceDialog()
-                .show(childFragmentManager, CustomInstanceDialog::class.java.name)
-            true
-        }
-
-        val clearCustomInstances = findPreference<Preference>(PreferenceKeys.CLEAR_CUSTOM_INSTANCES)
-        clearCustomInstances?.setOnPreferenceClickListener {
-            lifecycleScope.launch {
-                Database.customInstanceDao().deleteAll()
-                ActivityCompat.recreate(requireActivity())
-            }
+            CustomInstancesListDialog()
+                .show(childFragmentManager, CreateCustomInstanceDialog::class.java.name)
             true
         }
 
@@ -133,21 +119,19 @@ class InstanceSettings : BasePreferenceFragment() {
                 .show(childFragmentManager, DeleteAccountDialog::class.java.name)
             true
         }
+
+        findPreference<SwitchPreferenceCompat>(PreferenceKeys.FULL_LOCAL_MODE)?.setOnPreferenceChangeListener { _, newValue ->
+            // when the full local mode gets enabled, the fetch instance is no longer used and replaced
+            // fully by local extraction. thus, the user has to be logged out from the fetch instance
+            if (newValue == true && !authInstanceToggle.isChecked) logoutAndUpdateUI()
+            true
+        }
     }
 
-    private suspend fun initInstancesPref(
-        instancePrefs: List<ListPreference>,
-        publicInstances: List<PipedInstance>
-    ) = runCatching {
-        val customInstances = withContext(Dispatchers.IO) {
-            Database.customInstanceDao().getAll()
-        }.map { PipedInstance(it.name, it.apiUrl) }
-
-        instances = publicInstances.plus(customInstances).toMutableList()
-
+    private fun initInstancesPref(instancePrefs: List<ListPreference>) = runCatching {
         // add the currently used instances to the list if they're currently down / not part
         // of the public instances list
-        for (apiUrl in listOf(RetrofitInstance.apiUrl, RetrofitInstance.authUrl)) {
+        for (apiUrl in listOf(PipedMediaServiceRepository.apiUrl, RetrofitInstance.authUrl)) {
             if (instances.none { it.apiUrl == apiUrl }) {
                 val origin = apiUrl.toHttpUrl().host
                 instances.add(PipedInstance(origin, apiUrl, isCurrentlyDown = true))
@@ -172,7 +156,11 @@ class InstanceSettings : BasePreferenceFragment() {
     }
 
     override fun onDisplayPreferenceDialog(preference: Preference) {
-        if (preference.key in arrayOf(PreferenceKeys.FETCH_INSTANCE, PreferenceKeys.AUTH_INSTANCE)) {
+        if (preference.key in arrayOf(
+                PreferenceKeys.FETCH_INSTANCE,
+                PreferenceKeys.AUTH_INSTANCE
+            )
+        ) {
             showInstanceSelectionDialog(preference as ListPreference)
         } else {
             super.onDisplayPreferenceDialog(preference)
@@ -212,10 +200,14 @@ class InstanceSettings : BasePreferenceFragment() {
     }
 
     private fun resetForNewInstance() {
+        val authInstanceToggle = findPreference<SwitchPreferenceCompat>(
+            PreferenceKeys.AUTH_INSTANCE_TOGGLE
+        )!!
+
         if (!authInstanceToggle.isChecked) {
             logoutAndUpdateUI()
         }
-        RetrofitInstance.lazyMgr.reset()
+        RetrofitInstance.apiLazyMgr.reset()
         ActivityCompat.recreate(requireActivity())
     }
 

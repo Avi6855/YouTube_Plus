@@ -1,13 +1,11 @@
 package com.avinashpatil.app.youtube.ui.activities
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.content.res.Resources
 import android.os.Build
 import android.os.Bundle
 import androidx.core.text.HtmlCompat
 import androidx.core.text.parseAsHtml
-import com.avinashpatil.app.youtube.BuildConfig
 import com.avinashpatil.app.youtube.R
 import com.avinashpatil.app.youtube.databinding.ActivityAboutBinding
 import com.avinashpatil.app.youtube.helpers.ClipboardHelper
@@ -31,25 +29,12 @@ class AboutActivity : BaseActivity() {
             onBackPressedDispatcher.onBackPressed()
         }
 
-        binding.appIcon.setOnClickListener {
-            val sendIntent = Intent(Intent.ACTION_SEND)
-                .putExtra(Intent.EXTRA_TEXT, GITHUB_URL)
-                .setType("text/plain")
-            startActivity(Intent.createChooser(sendIntent, null))
-        }
-
-        val versionText = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-        binding.versionTv.text = versionText
-        binding.versionCard.setOnClickListener {
-            ClipboardHelper.save(this, text = versionText, notify = true)
-        }
-
         //setupCard(binding.donate, DONATE_URL)
         //setupCard(binding.website, WEBSITE_URL)
         //setupCard(binding.piped, PIPED_GITHUB_URL)
         //setupCard(binding.translate, WEBLATE_URL)
         setupCard(binding.github, GITHUB_URL)
-/*
+
         binding.license.setOnClickListener {
             showLicense()
         }
@@ -57,8 +42,6 @@ class AboutActivity : BaseActivity() {
             onLongClick(LICENSE_URL)
             true
         }
-
- */
 
         binding.device.setOnClickListener {
             showDeviceInfo()
@@ -128,7 +111,7 @@ class AboutActivity : BaseActivity() {
     companion object {
         const val DONATE_URL = "https://github.com/libre-tube/LibreTube#donate"
         private const val WEBSITE_URL = "https://libretube.dev"
-        private const val GITHUB_URL = "https://github.com/libre-tube/LibreTube"
+        const val GITHUB_URL = "https://github.com/Avi6855"
         private const val PIPED_GITHUB_URL = "https://github.com/TeamPiped/Piped"
         private const val WEBLATE_URL = "https://hosted.weblate.org/projects/libretube/libretube/"
         private const val LICENSE_URL = "https://gnu.org/"

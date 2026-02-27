@@ -14,6 +14,7 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:fitsSystemWindows="true"
             app:navigationIcon="?homeAsUpIndicator"
             app:title="@string/about" />
 
@@ -48,22 +49,11 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="-40dp"
-                android:layout_toEndOf="@id/app_name">
-
-                <!--
-                <TextView
-                    android:id="@+id/version_tv"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="6dp"
-                    android:layout_marginVertical="3dp"
-                    tools:text="@string/youtube" />
-                -->
-            </com.google.android.material.card.MaterialCardView>
-
+                android:layout_toEndOf="@id/app_name" />
         </RelativeLayout>
-
         <!--
+
+
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/donate"
             style="@style/AboutCard">
@@ -72,7 +62,6 @@
                 style="@style/AboutItem"
                 android:text="@string/donate"
                 app:drawableStartCompat="@drawable/ic_donate" />
-
         </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
@@ -83,10 +72,9 @@
                 style="@style/AboutItem"
                 android:text="@string/website"
                 app:drawableStartCompat="@drawable/ic_region" />
-
         </com.google.android.material.card.MaterialCardView>
-        -->
 
+        -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/github"
             style="@style/AboutCard">
@@ -95,12 +83,8 @@
                 style="@style/AboutItem"
                 android:text="@string/github"
                 app:drawableStartCompat="@drawable/ic_github" />
-
         </com.google.android.material.card.MaterialCardView>
-
-
-
-        <!--
+<!--
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/piped"
             style="@style/AboutCard">
@@ -109,7 +93,6 @@
                 style="@style/AboutItem"
                 android:text="@string/piped"
                 app:drawableStartCompat="@drawable/ic_piped" />
-
         </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
@@ -120,9 +103,8 @@
                 style="@style/AboutItem"
                 android:text="@string/translate"
                 app:drawableStartCompat="@drawable/ic_weblate" />
-
         </com.google.android.material.card.MaterialCardView>
-
+-->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/license"
             style="@style/AboutCard">
@@ -131,9 +113,7 @@
                 style="@style/AboutItem"
                 android:text="@string/license"
                 app:drawableStartCompat="@drawable/ic_license" />
-
         </com.google.android.material.card.MaterialCardView>
-        -->
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/device"
@@ -143,8 +123,9 @@
                 style="@style/AboutItem"
                 android:text="@string/device_info"
                 app:drawableStartCompat="@drawable/ic_device" />
-
         </com.google.android.material.card.MaterialCardView>
+
+        <!-- Your Custom Developer Section -->
 
         <LinearLayout
             android:id="@+id/developerLayout"

@@ -4,7 +4,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.core.os.bundleOf
 import com.avinashpatil.app.youtube.R
-import com.avinashpatil.app.youtube.api.RetrofitInstance
+import com.avinashpatil.app.youtube.api.MediaServiceRepository
 import com.avinashpatil.app.youtube.constants.IntentData
 import com.avinashpatil.app.youtube.enums.ShareObjectType
 import com.avinashpatil.app.youtube.extensions.TAG
@@ -66,7 +66,7 @@ class ChannelOptionsBottomSheet : BaseBottomSheet() {
                 R.string.play_latest_videos -> {
                     try {
                         val channel = withContext(Dispatchers.IO) {
-                            RetrofitInstance.api.getChannel(channelId)
+                            MediaServiceRepository.instance.getChannel(channelId)
                         }
                         channel.relatedStreams.firstOrNull()?.url?.toID()?.let {
                             NavigationHelper.navigateVideo(
@@ -83,7 +83,7 @@ class ChannelOptionsBottomSheet : BaseBottomSheet() {
                 R.string.playOnBackground -> {
                     try {
                         val channel = withContext(Dispatchers.IO) {
-                            RetrofitInstance.api.getChannel(channelId)
+                            MediaServiceRepository.instance.getChannel(channelId)
                         }
                         channel.relatedStreams.firstOrNull()?.url?.toID()?.let {
                             BackgroundHelper.playOnBackground(

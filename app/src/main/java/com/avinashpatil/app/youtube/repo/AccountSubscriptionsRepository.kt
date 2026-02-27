@@ -6,10 +6,12 @@ import com.avinashpatil.app.youtube.api.obj.Subscription
 import com.avinashpatil.app.youtube.extensions.toID
 import com.avinashpatil.app.youtube.helpers.PreferenceHelper
 
-class AccountSubscriptionsRepository: SubscriptionsRepository {
+class AccountSubscriptionsRepository : SubscriptionsRepository {
     private val token get() = PreferenceHelper.getToken()
 
-    override suspend fun subscribe(channelId: String) {
+    override suspend fun subscribe(
+        channelId: String, name: String, uploaderAvatar: String?, verified: Boolean
+    ) {
         runCatching {
             RetrofitInstance.authApi.subscribe(token, Subscribe(channelId))
         }
