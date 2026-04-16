@@ -46,26 +46,19 @@ Since full demo video is not available, individual feature demos are shared via 
 ### 🔍 Search Feature
 
 [👉 Watch Demo](https://www.linkedin.com/feed/update/urn:li:activity:7437563053686157313/?originTrackingId=glxov6q6RaSfl9uPfVAMRw%3D%3D)
-![Search Thumbnail]()
+![Search Thumbnail](https://github.com/Avi6855/YouTube_Plus/blob/adc14e1aee9874a2d1225d863e680db567ed630f/Search%20%26%20Smart%20Suggestions%20Feature.png)
 
 ### 🎧 Audio Mode
 
 [👉 Watch Demo](https://www.linkedin.com/feed/update/urn:li:activity:7438281181650907136/?originTrackingId=q3%2FE2cYOSGS9v86SFNAjHw%3D%3D)
 
 [👉 Watch Demo](https://www.linkedin.com/feed/update/urn:li:activity:7438279670833377280/?originTrackingId=yy8waDMJTOaMjs7iqZofIA%3D%3D)
-![Audio Mode Thumbnail]()
+![Audio Mode Thumbnail](https://github.com/Avi6855/YouTube_Plus/blob/adc14e1aee9874a2d1225d863e680db567ed630f/Instant%20Video%20to%20Audio%20Mode%20%26%20Background%20Playback.png)
 
 ### 🔔 Subscribe Feature
 
 [👉 Watch Demo](https://www.linkedin.com/feed/update/urn:li:activity:7439327732792168448/?originTrackingId=PoaTXKjVSZmx5xKmIbXlRQ%3D%3D)
-![Subscribe Thumbnail]()
-
-> 📌 **Tip:**
-> Save your generated thumbnails inside:
-
-```
-/assets/
-```
+![Subscribe Thumbnail](https://github.com/Avi6855/YouTube_Plus/blob/adc14e1aee9874a2d1225d863e680db567ed630f/Instant%20Subscribe%20%20Unsubscribe%20Feature.png)
 
 ---
 
